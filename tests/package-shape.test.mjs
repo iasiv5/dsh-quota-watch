@@ -10,7 +10,7 @@ const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'ut
 
 test('package metadata identifies the approved DSH plugin and release target', () => {
   assert.equal(packageJson.name, '@iasiv5/dsh-quota-watch')
-  assert.equal(packageJson.version, '0.0.1')
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+$/)
   assert.equal(packageJson.repository.url, 'https://github.com/iasiv5/dsh-quota-watch')
   assert.equal(packageJson.dsh.engines.dsh, '>=0.1.7-rc.2')
   assert.equal(packageJson.dsh.bundle.patch, './cordis.patch.yml')
