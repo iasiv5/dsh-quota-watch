@@ -32,6 +32,7 @@
 - 本仓库、测试 fixtures 与 npm 包不得包含任何真实 key、OAuth grant、临时 token、原始账号响应或个人余额。测试仅使用合成响应。
 - npm 包采用显式 `files` 白名单；`npm run security:check` 会扫描工作树和实际 pack 文件，诊断只报告路径和规则名，不打印匹配值。
 - 首次 bootstrap 发布真实插件 `0.0.1` 后配置 npm Trusted Publishing；后续 tag release 使用 GitHub Actions OIDC 与 provenance，不保存长期 npm token。
+- npm Registry 会把发布账号当时的邮箱写入公开 metadata，且修改账号邮箱不会改写既有版本记录。发布后续版本前，请先把 npm 账号邮箱改为适合公开显示的地址，并在 GitHub 仓库设置 `NPM_PUBLIC_EMAIL_CONFIRMED=true`；publish workflow 未得到该确认会拒绝发布。
 
 ## 安装
 

@@ -27,4 +27,12 @@ jobs:
       - run: npm run build
       - run: npm run security:check
       - run: node --check lib/client.js
+      - name: Require public-safe npm account email
+        env:
+          NPM_PUBLIC_EMAIL_CONFIRMED: ${{ vars.NPM_PUBLIC_EMAIL_CONFIRMED }}
+        run: |
+          if [ "$NPM_PUBLIC_EMAIL_CONFIRMED" != "true" ]; then
+            echo "Set NPM_PUBLIC_EMAIL_CONFIRMED=true only after the npm account email is safe for public metadata."
+            exit 1
+          fi
       - run: npm publish --provenance --access public --registry https://registry.npmjs.org/
