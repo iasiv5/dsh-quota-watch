@@ -31,8 +31,8 @@
 - API 路由只允许 loopback 或已配对的浏览器访问；响应禁用缓存。
 - 本仓库、测试 fixtures 与 npm 包不得包含任何真实 key、OAuth grant、临时 token、原始账号响应或个人余额。测试仅使用合成响应。
 - npm 包采用显式 `files` 白名单；`npm run security:check` 会扫描工作树和实际 pack 文件，诊断只报告路径和规则名，不打印匹配值。
-- 首次 bootstrap 发布真实插件 `0.0.1` 后配置 npm Trusted Publishing；后续 tag release 使用 GitHub Actions OIDC 与 provenance，不保存长期 npm token。
-- npm Registry 会把发布账号当时的邮箱写入公开 metadata，且修改账号邮箱不会改写既有版本记录。发布后续版本前，请先把 npm 账号邮箱改为适合公开显示的地址，并在 GitHub 仓库设置 `NPM_PUBLIC_EMAIL_CONFIRMED=true`；publish workflow 未得到该确认会拒绝发布。
+- 首次 bootstrap 发布真实插件 `0.0.1` 使用 npm web-login；后续 tag release 使用 GitHub Actions OIDC 与 provenance，版本发布者身份为 GitHub Actions，不保存长期 npm token。
+- OIDC 不会改写已发布的 `0.0.1` 元数据，也不负责移除 Registry 级 maintainer 字段；源码和 npm tarball 不写入发布账号邮箱。
 
 ## 安装
 
