@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { findSecretRules, isSensitivePath } from '../scripts/check-public-package.mjs'
+import { findSecretRules, isSensitivePath, parseNpmPackManifest } from '../scripts/check-public-package.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -33,4 +33,9 @@ test('project ignore rules protect local npm credentials and maintainer plans', 
   assert.match(ignore, /^\.npmrc$/m)
   assert.match(ignore, /^\.credentials\.yaml$/m)
   assert.match(ignore, /^docs\/plans\/$/m)
+})
+
+test('pack manifest parser supports npm 11 array and npm 12 keyed-object output', () => {
+  assert.deepEqual(parseNpmPackManifest(JSON.stringify([{ files: [{ path: 'README.md' }] }])), ['README.md'])
+  assert.deepEqual(parseNpmPackManifest(JSON.stringify({ 'pkg@0.0.1': { files: [{ path: 'src/host.mjs' }] } })), ['src/host.mjs'])
 })

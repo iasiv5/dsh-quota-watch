@@ -62,17 +62,21 @@ function gitFiles() {
   }
 }
 
+export function parseNpmPackManifest(output) {
+  const parsed = JSON.parse(output)
+  const candidates = Array.isArray(parsed) ? parsed : Object.values(parsed ?? {})
+  const manifest = candidates.find((candidate) => Array.isArray(candidate?.files))
+  if (manifest === undefined) throw new Error('npm pack did not return a file manifest')
+  return manifest.files.map((file) => file.path).filter((path) => typeof path === 'string')
+}
+
 function npmPackFiles() {
-  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts', '--loglevel=silent'], {
     cwd: ROOT,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
   })
-  const parsed = JSON.parse(output)
-  if (!Array.isArray(parsed) || !Array.isArray(parsed[0]?.files)) {
-    throw new Error('npm pack did not return a file manifest')
-  }
-  return parsed[0].files.map((file) => file.path)
+  return parseNpmPackManifest(output)
 }
 
 async function check() {
