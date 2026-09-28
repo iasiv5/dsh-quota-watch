@@ -1,0 +1,28 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm install --global npm@latest
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: npm run security:check
+      - run: node --check lib/client.js
+      - run: npm publish --provenance --access public --registry https://registry.npmjs.org/

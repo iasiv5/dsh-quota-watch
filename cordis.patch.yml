@@ -1,0 +1,6 @@
+# Mount the host-side quota watcher; the browser half is supplied by dsh.client.
+- insert:
+    - id: quota-watch
+      name: '@iasiv5/dsh-quota-watch'
+      config:
+        pollIntervalSec: 60

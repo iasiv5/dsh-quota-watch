@@ -1,0 +1,28 @@
+{
+  "copilot_plan": "enterprise",
+  "access_type_sku": "synthetic-enterprise-seat",
+  "token_based_billing": true,
+  "quota_reset_date": "2026-11-01",
+  "quota_snapshots": {
+    "premium_interactions": {
+      "unlimited": false,
+      "entitlement": 10000,
+      "remaining": 7600,
+      "percent_remaining": 76,
+      "credits_used": 2400,
+      "token_based_billing": true
+    },
+    "chat": {
+      "unlimited": true,
+      "entitlement": 0,
+      "remaining": 0,
+      "credits_used": 0
+    },
+    "completions": {
+      "unlimited": true,
+      "entitlement": 0,
+      "remaining": 0,
+      "credits_used": 0
+    }
+  }
+}

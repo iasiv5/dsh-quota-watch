@@ -1,0 +1,13 @@
+node_modules/
+.npmrc
+.npm-cache/
+.npm-logs/
+*.tgz
+*.log
+*.bak
+.env
+.env.*
+.credentials.yaml
+
+# Local implementation plans may contain maintainer workstation paths.
+docs/plans/

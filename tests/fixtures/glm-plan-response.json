@@ -1,0 +1,33 @@
+{
+  "success": true,
+  "data": {
+    "level": "GLM-Code-Plan",
+    "limits": [
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 6,
+        "percentage": 72,
+        "nextResetTime": "2026-10-04T00:00:00.000Z"
+      },
+      {
+        "type": "CREDIT_LIMIT",
+        "unit": 5,
+        "currentValue": 250,
+        "usage": 1000,
+        "percentage": 10,
+        "nextResetTime": "2026-11-01T00:00:00.000Z"
+      },
+      {
+        "type": "TOKENS_LIMIT",
+        "unit": 3,
+        "percentage": 12.5,
+        "nextResetTime": "2026-10-03T10:40:00.000Z"
+      },
+      {
+        "type": "TIME_LIMIT",
+        "unit": 3,
+        "percentage": 99
+      }
+    ]
+  }
+}
