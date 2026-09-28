@@ -30,6 +30,23 @@ export function isSensitivePath(path) {
     || /\.(?:bak|log|pem|key)$/i.test(name)
 }
 
+export function isGitHubNoreplyEmail(value) {
+  return typeof value === 'string' && /^[^@\s]+@users\.noreply\.github\.com$/i.test(value)
+}
+
+function currentGitRoot() {
+  try {
+    const output = execFileSync('git', ['rev-parse', '--show-toplevel'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    return resolve(output.trim())
+  } catch {
+    return undefined
+  }
+}
+
 async function walk(directory) {
   const output = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -42,15 +59,8 @@ async function walk(directory) {
 }
 
 function gitFiles() {
+  if (currentGitRoot() !== ROOT) return undefined
   try {
-    const gitRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd: ROOT,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim()
-    // A nested workspace may resolve to an enclosing Git repository. Only trust
-    // Git enumeration when the discovered root is this package's own repository.
-    if (resolve(gitRoot) !== ROOT) return undefined
     const output = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], {
       cwd: ROOT,
       encoding: 'utf8',
@@ -59,6 +69,23 @@ function gitFiles() {
     return output.split(/\r?\n/).filter(Boolean).map((path) => resolve(ROOT, path))
   } catch {
     return undefined
+  }
+}
+
+function commitMetadataFinding() {
+  if (currentGitRoot() !== ROOT) return undefined
+  try {
+    const output = execFileSync('git', ['log', '--format=%ae%n%ce'], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const emails = output.split(/\r?\n/).filter(Boolean)
+    return emails.some((email) => !isGitHubNoreplyEmail(email))
+      ? { path: 'Git commit metadata', rule: 'non-noreply-author-or-committer' }
+      : undefined
+  } catch {
+    return { path: 'Git commit metadata', rule: 'metadata-unavailable' }
   }
 }
 
@@ -82,6 +109,8 @@ function npmPackFiles() {
 async function check() {
   const worktreeFiles = gitFiles() ?? await walk(ROOT)
   const findings = []
+  const metadataFinding = commitMetadataFinding()
+  if (metadataFinding !== undefined) findings.push(metadataFinding)
   for (const absolute of worktreeFiles) {
     const rel = relative(ROOT, absolute)
     if (isSensitivePath(rel)) {

@@ -44,12 +44,14 @@ test('Cordis patch and GitHub workflows parse and enforce OIDC publishing', asyn
   assert.equal(patch[0].insert[0].id, 'quota-watch')
 
   const ci = parse(await readFile(resolve(root, '.github/workflows/ci.yml'), 'utf8'))
+  assert.equal(ci.jobs.verify.steps.find((step) => step.uses === 'actions/checkout@v4').with['fetch-depth'], 0)
   assert.ok(Object.hasOwn(ci.on, 'push'))
   assert.ok(Object.hasOwn(ci.on, 'pull_request'))
   assert.ok(ci.jobs.verify.steps.some((step) => step.run === 'npm run security:check'))
   assert.ok(ci.jobs.verify.steps.some((step) => step.run === 'npm install --global npm@12.1.0'))
 
   const publish = parse(await readFile(resolve(root, '.github/workflows/publish.yml'), 'utf8'))
+  assert.equal(publish.jobs.publish.steps.find((step) => step.uses === 'actions/checkout@v4').with['fetch-depth'], 0)
   assert.deepEqual(publish.on.push.tags, ['v*'])
   assert.ok(publish.jobs.publish.steps.some((step) => step.run === 'npm install --global npm@12.1.0'))
   assert.equal(publish.permissions['id-token'], 'write')
