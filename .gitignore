@@ -8,6 +8,3 @@ node_modules/
 .env
 .env.*
 .credentials.yaml
-
-# Local implementation plans may contain maintainer workstation paths.
-docs/plans/

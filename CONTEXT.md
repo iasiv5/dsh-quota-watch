@@ -24,3 +24,9 @@ _Avoid_: Organization-wide balance
 
 **Copilot AI credit balance**: Unspent credits at the applicable personal or organizational billing entity. For an organization-managed seat, a per-user balance cannot be inferred from that person's consumption alone.
 _Avoid_: Per-user remaining balance (for pooled organizational credits)
+
+**Used percentage**: The share of a quota window that a provider reports as consumed, or the arithmetic inversion (100 − value) of a provider-reported remaining percentage when a view normalizes both providers to used. An inverted value is anchored to a single provider-reported number, never combined with other fields.
+_Avoid_: Presenting an inverted value as provider-reported used; deriving used from entitlement minus a separately reported consumed amount
+
+**Provider usage statistic**: Token totals and call counts that a provider's monitor API reports for a stated query interval, such as the host-local calendar day ("today"). It is a consumption measure over an interval, distinct from quota windows and from anything inferred from DSH session events.
+_Avoid_: Calling it a quota; session usage; treating the interval as a rolling window unless it is one
