@@ -21,6 +21,7 @@ const COPY = {
     reset: '重置',
     todayTokens: '今日 tokens',
     todayCalls: '今日调用',
+    todayModels: '今日模型',
     windows: {
       '5h': '5 小时窗口 · 已用',
       week: '每周窗口 · 已用',
@@ -41,6 +42,7 @@ const COPY = {
     reset: 'Resets',
     todayTokens: 'Today tokens',
     todayCalls: 'Calls today',
+    todayModels: 'Models today',
     windows: {
       '5h': '5-hour window · used',
       week: 'Weekly window · used',
@@ -53,15 +55,15 @@ const COPY = {
 const STYLE_TEXT = `
 [data-dsh-quota-watch-card] { box-sizing: border-box; width: 100%; margin: 0 0 8px; color: var(--dsw-alias-label-primary, inherit); font: inherit; }
 [data-dsh-quota-watch-card] *, [data-dsh-quota-watch-card] *::before, [data-dsh-quota-watch-card] *::after { box-sizing: border-box; }
-.dqw-card { border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.dqw-card { border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; }
 .dqw-head { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.dqw-title { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 600; line-height: 18px; }
-.dqw-button { border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11px; line-height: 18px; padding: 1px 4px; }
+.dqw-title { flex: 1; min-width: 0; margin: 0; font-size: 12px; font-weight: 600; line-height: 17px; }
+.dqw-button { border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 11px; line-height: 16px; padding: 0 4px; }
 .dqw-button:hover { background: var(--dsw-alias-bg-hover, rgba(128,128,128,.16)); }
 .dqw-button:disabled { cursor: wait; opacity: .6; }
 .dqw-meta { margin: 0; font-size: 10px; line-height: 14px; opacity: .7; }
 .dqw-body { display: flex; flex-direction: column; }
-.dqw-row-summary { display: flex; align-items: center; gap: 6px; padding: 7px 6px; margin: 1px -2px 2px; border-radius: 8px; }
+.dqw-row-summary { display: flex; align-items: center; gap: 6px; padding: 3px 6px; margin: 0 -2px; border-radius: 8px; }
 .dqw-row-summary[data-expandable] { cursor: pointer; }
 .dqw-row-summary[data-expandable]:hover { background: var(--dsw-alias-bg-hover, rgba(128,128,128,.12)); }
 .dqw-row-summary:focus-visible { outline: 1px solid var(--dsw-alias-button-primary-fill, #5b8def); outline-offset: -1px; }
@@ -76,17 +78,27 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dqw-detail { padding: 2px 6px 6px; display: flex; flex-direction: column; gap: 7px; }
+.dqw-pop { position: fixed; z-index: 2147483000; min-width: 232px; max-width: 320px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); color: var(--dsw-alias-label-primary, inherit); box-shadow: 0 10px 28px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 8px; font: inherit; }
+.dqw-pop[hidden] { display: none; }
+.dqw-pop *, .dqw-pop *::before, .dqw-pop *::after { box-sizing: border-box; }
 .dqw-bignums { display: flex; gap: 6px; }
-.dqw-big { flex: 1; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); border-radius: 8px; padding: 6px 8px; }
-.dqw-big .dqw-big-value { font-size: 16px; font-weight: 650; line-height: 20px; font-variant-numeric: tabular-nums; }
+.dqw-big { flex: 1; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); border-radius: 8px; padding: 5px 8px; }
+.dqw-big .dqw-big-value { font-size: 15px; font-weight: 650; line-height: 19px; font-variant-numeric: tabular-nums; }
 .dqw-big .dqw-big-label { font-size: 9.5px; line-height: 13px; opacity: .65; }
 .dqw-row { display: flex; flex-direction: column; gap: 2px; }
 .dqw-row-head { display: flex; justify-content: space-between; gap: 5px; font-size: 10px; line-height: 14px; }
 .dqw-muted { margin: 0; font-size: 10px; line-height: 14px; opacity: .7; }
-.dqw-models { margin: 0; font-size: 10px; line-height: 15px; opacity: .8; border-top: 1px dashed var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); padding-top: 6px; }
+.dqw-reset { margin: 0; text-align: right; font-size: 9.5px; line-height: 13px; opacity: .55; font-variant-numeric: tabular-nums; }
+.dqw-models { border-top: 1px dashed var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); padding-top: 6px; display: flex; flex-direction: column; gap: 3px; }
+.dqw-models-title { font-size: 9.5px; line-height: 13px; opacity: .6; }
+.dqw-model-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 10.5px; line-height: 15px; font-variant-numeric: tabular-nums; }
+.dqw-model-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+.dqw-model-value { flex: none; font-weight: 600; }
+.dqw-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
+.dqw-kv-label { flex: none; opacity: .65; }
+.dqw-kv-value { min-width: 0; text-align: right; font-weight: 600; }
+.dqw-updated { margin: 0; border-top: 1px dashed var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); padding-top: 5px; text-align: right; font-size: 9.5px; line-height: 13px; opacity: .55; font-variant-numeric: tabular-nums; }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
-.dqw-credit { margin: 0; font-size: 10px; line-height: 14px; font-variant-numeric: tabular-nums; }
 `
 
 function localeFor(win) {
@@ -128,6 +140,14 @@ function text(doc, tag, className, value) {
   if (className) node.className = className
   node.textContent = String(value ?? '')
   return node
+}
+
+/** Aligned label/value line used by the simplified Copilot detail. */
+function kvRow(doc, label, value) {
+  const row = doc.createElement('div')
+  row.className = 'dqw-kv'
+  row.append(text(doc, 'span', 'dqw-kv-label', label), text(doc, 'span', 'dqw-kv-value', value))
+  return row
 }
 
 function progress(doc, label, percent, locale) {
@@ -233,11 +253,18 @@ export function mountQuotaCard({
   header.append(refreshButton)
   const body = doc.createElement('div')
   body.className = 'dqw-body'
+  // Status line doubles as the transport-error surface; hidden once data renders.
   const lastUpdated = text(doc, 'p', 'dqw-meta', copy.loading)
   lastUpdated.dataset.role = 'updated'
   body.append(lastUpdated)
   card.append(header, body)
   container.append(style, card)
+  // Details open in a fixed-position panel to the right of the rows.
+  const pop = doc.createElement('div')
+  pop.className = 'dqw-pop'
+  pop.dataset.dshQuotaWatchPop = ''
+  pop.hidden = true
+  doc.body.append(pop)
   let snapshot
   let requestSequence = 0
   let timer
@@ -247,8 +274,8 @@ export function mountQuotaCard({
 
   const fillClass = (percent) => (percent > 95 ? 'dqw-bar-fill danger' : percent > 80 ? 'dqw-bar-fill warn' : 'dqw-bar-fill')
 
-  /** Build [row, detail] fragments for one provider, or null when it must not render. */
-  const renderProvider = (key, model, provider) => {
+  /** Build the summary row for one provider, or null when it must not render. */
+  const renderProvider = (key, model) => {
     if (model === null) return null
     const row = doc.createElement('div')
     row.className = 'dqw-row-summary'
@@ -288,11 +315,7 @@ export function mountQuotaCard({
       row.append(extra)
     }
     row.append(text(doc, 'span', 'dqw-chev', openKey === key ? '▾' : '▸'))
-    const detail = doc.createElement('div')
-    detail.className = 'dqw-detail'
-    detail.dataset.dshQuotaWatchDetail = key
-    if (openKey === key) renderDetail(detail, key, provider)
-    return [row, detail]
+    return [row]
   }
 
   function renderDetail(detail, key, provider) {
@@ -326,37 +349,92 @@ export function mountQuotaCard({
           detail.append(text(doc, 'p', 'dqw-muted', label))
         }
         const reset = formatTime(window?.resetsAt, locale)
-        if (reset) detail.append(text(doc, 'p', 'dqw-muted', `${copy.reset}: ${reset}`))
+        if (reset) detail.append(text(doc, 'p', 'dqw-reset', `${copy.reset}: ${reset}`))
       }
-      const models = Array.isArray(usage?.models) && usage.models.length > 0
-        ? usage.models.map((model) => `${model.name} ${formatCompact(model.tokens, locale)}`).join(' · ')
-        : undefined
-      if (models) detail.append(text(doc, 'p', 'dqw-models', models))
+      if (Array.isArray(usage?.models) && usage.models.length > 0) {
+        const models = doc.createElement('div')
+        models.className = 'dqw-models'
+        models.append(text(doc, 'div', 'dqw-models-title', copy.todayModels))
+        for (const model of usage.models) {
+          const row = doc.createElement('div')
+          row.className = 'dqw-model-row'
+          row.append(
+            text(doc, 'span', 'dqw-model-name', model?.name ?? '—'),
+            text(doc, 'span', 'dqw-model-value', formatCompact(model?.tokens, locale)),
+          )
+          models.append(row)
+        }
+        detail.append(models)
+      }
       const updated = formatTime(provider?.updatedAt ? new Date(provider.updatedAt).toISOString() : '', locale)
-      if (updated) detail.append(text(doc, 'p', 'dqw-meta', `${copy.updated}: ${updated}`))
+      if (updated) detail.append(text(doc, 'p', 'dqw-updated', `${copy.updated}: ${updated}`))
       return
     }
     const quota = provider?.quota
     if (quota?.balanceAvailable === true) {
-      detail.append(text(doc, 'p', 'dqw-credit', `${copy.available}: ${formatNumber(quota.remaining, locale)} / ${formatNumber(quota.entitlement, locale)}`))
+      detail.append(kvRow(doc, copy.available, `${formatNumber(quota.remaining, locale)} / ${formatNumber(quota.entitlement, locale)}`))
       const used = remainingToUsed(quota.percentRemaining)
-      if (used !== undefined) detail.append(progress(doc, copy.used, used, locale))
       if (typeof quota.creditsUsed === 'number' && quota.creditsUsed >= 0) {
-        detail.append(text(doc, 'p', 'dqw-muted', `${copy.used}: ${formatNumber(quota.creditsUsed, locale)}`))
+        const usedText = used !== undefined
+          ? `${formatNumber(quota.creditsUsed, locale)} · ${formatPercent(used, locale)}`
+          : formatNumber(quota.creditsUsed, locale)
+        detail.append(kvRow(doc, copy.used, usedText))
       }
+      const reset = formatTime(quota?.resetsAt, locale)
+      if (reset) detail.append(kvRow(doc, copy.reset, reset))
     } else {
       detail.append(text(doc, 'p', 'dqw-muted', copy.stale))
     }
-    const reset = formatTime(quota?.resetsAt, locale)
-    if (reset) detail.append(text(doc, 'p', 'dqw-muted', `${copy.reset}: ${reset}`))
+  }
+
+  /** Keep the detail panel anchored to the expanded row's right edge. */
+  const positionPop = () => {
+    if (pop.hidden || openKey === undefined) return
+    const row = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
+    if (!row) return
+    const rect = row.getBoundingClientRect()
+    const viewWidth = win.innerWidth ?? 1024
+    const viewHeight = win.innerHeight ?? 768
+    const width = pop.offsetWidth || 240
+    const height = pop.offsetHeight || 160
+    let left = rect.right + 8
+    if (left + width > viewWidth - 8) left = rect.left - width - 8
+    if (left + width > viewWidth - 8) left = viewWidth - width - 8
+    left = Math.max(8, left)
+    const top = Math.min(Math.max(rect.top, 8), Math.max(8, viewHeight - height - 8))
+    pop.style.left = `${Math.round(left)}px`
+    pop.style.top = `${Math.round(top)}px`
+  }
+
+  const syncPop = () => {
+    if (openKey === undefined || disposed) {
+      if (!pop.hidden) {
+        pop.hidden = true
+        pop.replaceChildren()
+        delete pop.dataset.dshQuotaWatchDetail
+      }
+      return
+    }
+    const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
+    const row = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
+    if (!provider || !row || !row.hasAttribute('data-expandable')) {
+      openKey = undefined
+      syncPop()
+      return
+    }
+    renderDetail(pop, openKey, provider)
+    pop.dataset.dshQuotaWatchDetail = openKey
+    pop.setAttribute('aria-label', openKey === 'glm' ? 'GLM' : 'Copilot')
+    pop.hidden = false
+    positionPop()
   }
 
   const renderAll = () => {
     const providers = snapshot?.providers ?? []
     const glm = providers.find((provider) => provider?.key === 'glm')
     const copilot = providers.find((provider) => provider?.key === 'copilot')
-    const glmParts = renderProvider('glm', glmRowModel(glm), glm)
-    const copilotParts = renderProvider('copilot', copilotRowModel(copilot), copilot)
+    const glmParts = renderProvider('glm', glmRowModel(glm))
+    const copilotParts = renderProvider('copilot', copilotRowModel(copilot))
     const fragment = doc.createDocumentFragment()
     fragment.append(lastUpdated)
     if (glmParts) fragment.append(...glmParts)
@@ -364,7 +442,13 @@ export function mountQuotaCard({
     body.replaceChildren(fragment)
     container.hidden = glmParts === null && copilotParts === null
     const updated = formatTime(snapshot?.updatedAt ? new Date(snapshot.updatedAt).toISOString() : '', locale)
-    lastUpdated.textContent = updated ? `${copy.updated}: ${updated}` : copy.loading
+    if (updated) {
+      lastUpdated.hidden = true
+    } else {
+      lastUpdated.hidden = false
+      lastUpdated.textContent = copy.loading
+    }
+    syncPop()
   }
 
   const render = (next) => {
@@ -373,8 +457,8 @@ export function mountQuotaCard({
   }
 
   const showTransportError = () => {
-    if (snapshot) lastUpdated.textContent = copy.requestFailed
-    else lastUpdated.textContent = copy.failed
+    lastUpdated.hidden = false
+    lastUpdated.textContent = snapshot ? copy.requestFailed : copy.failed
   }
 
   const poll = async (force) => {
@@ -445,10 +529,29 @@ export function mountQuotaCard({
       toggleRow(row.dataset.dshQuotaWatchRow)
     }
   }
+  const onDocPointerDown = (event) => {
+    if (openKey === undefined) return
+    const target = event.target
+    if (pop.contains(target) || target?.closest?.('[data-dsh-quota-watch-row]') || target?.closest?.(CARD_SELECTOR)) return
+    openKey = undefined
+    renderAll()
+  }
+  const onDocScroll = () => { positionPop() }
+  const onWinResize = () => { positionPop() }
+  const onDocKeydown = (event) => {
+    if (event.key === 'Escape' && openKey !== undefined) {
+      openKey = undefined
+      renderAll()
+    }
+  }
   refreshButton.addEventListener('click', onRefresh)
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
   doc.addEventListener('visibilitychange', onVisibilityChange)
+  doc.addEventListener('pointerdown', onDocPointerDown, true)
+  doc.addEventListener('scroll', onDocScroll, true)
+  doc.addEventListener('keydown', onDocKeydown)
+  win.addEventListener('resize', onWinResize)
   startPolling()
 
   return () => {
@@ -456,10 +559,15 @@ export function mountQuotaCard({
     stopPolling()
     observer.disconnect()
     doc.removeEventListener('visibilitychange', onVisibilityChange)
+    doc.removeEventListener('pointerdown', onDocPointerDown, true)
+    doc.removeEventListener('scroll', onDocScroll, true)
+    doc.removeEventListener('keydown', onDocKeydown)
+    win.removeEventListener('resize', onWinResize)
     refreshButton.removeEventListener('click', onRefresh)
     body.removeEventListener('click', onBodyClick)
     body.removeEventListener('keydown', onBodyKeydown)
     container.remove()
+    pop.remove()
   }
 }
 
