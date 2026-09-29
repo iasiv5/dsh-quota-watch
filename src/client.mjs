@@ -9,7 +9,7 @@ const FETCH_TIMEOUT_MS = 15_000
 
 const COPY = {
   zh: {
-    title: '套餐监控',
+    title: 'Token额度',
     openDetails: '查看详情',
     backToOverview: '返回额度概览',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
@@ -88,7 +88,7 @@ const STYLE_TEXT = `
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dqw-rail-trigger { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-primary, inherit); cursor: pointer; transition: background-color .12s, color .12s; }
-.dqw-rail-trigger svg { display: block; width: 16px; height: 16px; }
+.dqw-rail-trigger svg { display: block; width: 20px; height: 20px; }
 .dqw-rail-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-rail-trigger:active:not(:disabled), .dqw-rail-trigger[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.18)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-rail-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
@@ -100,7 +100,8 @@ const STYLE_TEXT = `
 .dqw-pop[hidden] { display: none; }
 .dqw-pop *, .dqw-pop *::before, .dqw-pop *::after { box-sizing: border-box; }
 .dqw-pop-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; }
-.dqw-pop-back { align-self: flex-start; margin: 0; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); font: inherit; font-size: 10.5px; line-height: 14px; cursor: pointer; }
+.dqw-pop-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
+.dqw-pop-back svg { display: block; width: 16px; height: 16px; }
 .dqw-pop-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
 .dqw-overview-row { display: flex; align-items: center; width: 100%; gap: 6px; margin: 0; padding: 5px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
@@ -179,8 +180,8 @@ function quotaIcon(doc) {
   const namespace = 'http://www.w3.org/2000/svg'
   const svg = doc.createElementNS(namespace, 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
-  svg.setAttribute('width', '16')
-  svg.setAttribute('height', '16')
+  svg.setAttribute('width', '20')
+  svg.setAttribute('height', '20')
   svg.setAttribute('fill', 'none')
   svg.setAttribute('stroke', 'currentColor')
   svg.setAttribute('stroke-width', '1.7')
@@ -189,7 +190,7 @@ function quotaIcon(doc) {
   svg.setAttribute('aria-hidden', 'true')
   svg.setAttribute('focusable', 'false')
   const arc = doc.createElementNS(namespace, 'path')
-  arc.setAttribute('d', 'M4 17a8 8 0 0 1 16 0')
+  arc.setAttribute('d', 'M4 17a8 8 0 0 1 16 0H4')
   const needle = doc.createElementNS(namespace, 'path')
   needle.setAttribute('d', 'm12 17 3.2-5.2')
   const hub = doc.createElementNS(namespace, 'circle')
@@ -199,6 +200,25 @@ function quotaIcon(doc) {
   hub.setAttribute('fill', 'currentColor')
   hub.setAttribute('stroke', 'none')
   svg.append(arc, needle, hub)
+  return svg
+}
+
+function backIcon(doc) {
+  const namespace = 'http://www.w3.org/2000/svg'
+  const svg = doc.createElementNS(namespace, 'svg')
+  svg.setAttribute('viewBox', '0 0 16 16')
+  svg.setAttribute('width', '16')
+  svg.setAttribute('height', '16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '1.7')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+  const chevrons = doc.createElementNS(namespace, 'path')
+  chevrons.setAttribute('d', 'M11 4 7 8l4 4M7 4 3 8l4 4')
+  svg.append(chevrons)
   return svg
 }
 
@@ -432,7 +452,8 @@ export function mountQuotaCard({
       back.className = 'dqw-pop-back'
       back.dataset.action = 'back-to-overview'
       back.setAttribute('aria-label', copy.backToOverview)
-      back.textContent = copy.backToOverview
+      back.title = copy.backToOverview
+      back.append(backIcon(doc))
       detail.append(back, text(doc, 'p', 'dqw-pop-title', copy.providerNames[key]))
     }
     if (provider?.status === 'stale') {
