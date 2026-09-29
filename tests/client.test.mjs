@@ -85,7 +85,8 @@ test('summary rows replace the expanded card and keep refresh and self-healing',
   const { dispose, requests } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
   assert.ok(container)
-  assert.equal(container.nextElementSibling, window.document.querySelector('.settingsArea'))
+  const footArea = window.document.querySelector('.footArea')
+  assert.equal(footArea.firstElementChild, container, 'card claims the top of the sidebar footer')
   assert.deepEqual(requests[0], { path: 'api/dsh-quota-watch/overview', method: 'GET' })
 
   assert.equal(container.querySelector('[data-action="collapse"]'), null)

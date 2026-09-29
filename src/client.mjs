@@ -489,11 +489,11 @@ export function mountQuotaCard({
   const place = () => {
     const foot = footArea(doc)
     if (!foot) return
-    const settings = foot.querySelector('[class*="settingsArea"]')
-    if (settings) {
-      if (container.parentElement !== foot || container.nextElementSibling !== settings) foot.insertBefore(container, settings)
-    } else if (container.parentElement !== foot || foot.lastElementChild !== container) {
-      foot.append(container)
+    // Claim the first slot of the sidebar footer so the card sits above the
+    // framework-rendered plugin entries and the settings row; the mutation
+    // observer re-seats it whenever the framework displaces it.
+    if (container.parentElement !== foot || foot.firstElementChild !== container) {
+      foot.insertBefore(container, foot.firstChild)
     }
   }
 
