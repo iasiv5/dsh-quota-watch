@@ -418,13 +418,13 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   assert.equal(cells[1].textContent, '·')
   assert.equal(cells[2].textContent, 'used')
   assert.match(cells[3].textContent, /1%/)
-  assert.match(cells[4].textContent, /Resets:/)
+  assert.match(cells[4].textContent, /^（ Resets: .+ ）$/)
   assert.equal(cells[5].textContent, '5-hour quota')
   assert.match(cells[8].textContent, /13%/)
   assert.equal(cells[10].textContent, 'Weekly quota')
   assert.equal(cells[11].textContent, '·')
   assert.match(cells[12].textContent, /♾️/, 'unlimited mark aligns with the used column')
-  assert.match(cells[14].textContent, /unlimited/)
+  assert.equal(cells[14].textContent, ' ( unlimited )')
   for (const index of [4, 9]) {
     assert.ok(cells[index].classList.contains('dqw-kv-sub'), 'reset time renders as weakened text')
   }
@@ -436,6 +436,20 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   assert.match(modelRows[0].textContent, /21\.4K/)
   assert.match(modelRows[1].textContent, /GLM-5\.3-Flash/)
   assert.match(modelRows[1].textContent, /8\.3M/)
+  dispose()
+  window.close()
+})
+
+test('Chinese reset and unlimited notes include spacing inside parentheses', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const { dispose } = await mounted(window, snapshot([glmProvider()]))
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  const detail = window.document.querySelector('[data-dsh-quota-watch-detail="glm"]')
+  const cells = [...detail.querySelector('.dqw-wins').children]
+  assert.match(cells[4].textContent, /^（ 重置: .+ ）$/)
+  assert.equal(cells[14].textContent, '（ 无限 ）')
   dispose()
   window.close()
 })

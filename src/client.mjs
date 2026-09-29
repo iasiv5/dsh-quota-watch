@@ -27,7 +27,7 @@ const COPY = {
     todayCalls: '调用次数',
     weekUnlimited: '每周额度',
     unlimited: '♾️',
-    unlimitedNote: '（无限）',
+    unlimitedNote: '（ 无限 ）',
     windows: {
       '5h': '5 小时额度',
       week: '每周额度',
@@ -54,7 +54,7 @@ const COPY = {
     todayCalls: 'Calls',
     weekUnlimited: 'Weekly quota',
     unlimited: '♾️',
-    unlimitedNote: ' (unlimited)',
+    unlimitedNote: ' ( unlimited )',
     windows: {
       '5h': '5-hour quota',
       week: 'Weekly quota',
@@ -488,7 +488,7 @@ export function mountQuotaCard({
         wins.append(text(doc, 'span', 'dqw-win-mid', '·'))
         wins.append(text(doc, 'span', 'dqw-win-used', copy.windowUsed))
         wins.append(text(doc, 'span', 'dqw-win-val', percent !== undefined ? formatPercent(percent, locale) : '—'))
-        wins.append(text(doc, 'span', 'dqw-kv-sub', reset ? `（${copy.reset}: ${reset}）` : ''))
+        wins.append(text(doc, 'span', 'dqw-kv-sub', reset ? `（ ${copy.reset}: ${reset} ）` : ''))
       }
       detail.append(wins)
       if (Array.isArray(usage?.models) && usage.models.length > 0) {
