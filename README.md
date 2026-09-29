@@ -6,7 +6,7 @@
 
 ## 功能
 
-- 在侧栏底部区块的最顶部（框架渲染的插件入口与设置行之上）显示一张常显摘要卡（无标题、无刷新按钮）：GLM 与 GitHub Copilot 各占一行，统一显示**已用百分比**（Copilot 为 `100 − percent_remaining` 的单值反转），已用超过 80% 进度条转橙、超过 95% 转红；点击行首的 GLM / Copilot 名称立即触发一次宿主探测（等同原刷新按钮），点击行其余区域展开详情。
+- 在侧栏底部区块的最顶部（框架渲染的插件入口与设置行之上）显示一张常显摘要卡（无标题、无刷新按钮）：GLM 与 GitHub Copilot 各占一行，统一显示**已用百分比**（Copilot 为 `100 − percent_remaining` 的单值反转），已用超过 80% 进度条转橙、超过 95% 转红；点击行首的 GLM / Copilot 名称立即触发一次宿主探测（等同原刷新按钮），点击行其余区域展开详情。侧栏收起时改为 36×36px 无框按钮与 16px 配额仪表盘图标，和设置按钮对齐；颜色使用 DSH 主题语义变量，自动适配浅色/深色皮肤。点击图标打开 GLM / Copilot 概览，可继续查看额度详情；不显示常驻提醒点。
 - GLM 摘要行固定显示 5 小时窗口已用百分比，行尾等宽小字为当日 token 用量；点击行在侧栏右侧弹出详情面板（半透明毛玻璃底，深浅主题均可读，不改变卡片高度）：今日 Tokens / 调用次数双大数字、窗口区为五列对齐网格（名称 ｜ `·` ｜ `已用`/♾️ ｜ 百分比 ｜ 同字号弱色「（重置: …）」，♾️ 与 `已用` 同列左对齐，弱色括注整列左对齐）、虚线分隔的分模型用量行（名称左对齐、token 数右对齐）。窗口按 MCP（月）→ 5 小时 → 每月 → 每周固定排序；接口未下发周窗口时显示「每周额度 · ♾️（无限）」占位，真实周窗口数据一旦下发即自动替换占位。同一时间至多展开一个详情；点击面板外或按 Esc 关闭。
 - GitHub Copilot 摘要行仅在 GitHub 返回有限、有效的 `remaining` 且带 `percent_remaining` 时显示；行尾等宽小字显示本期 credits 消耗的紧凑值。点击在侧栏右侧弹出精简详情（标签左对齐、数值右对齐的三行）：可用额度、本期已用（credits 消耗 + 弱化的已用百分比）、重置时间。`credits_used` 绝不用于推算余额，缺失有效百分比时该行不渲染。
 - 卡片顶部不显示全局更新时间；仅在等待首个快照或刷新失败时显示一行状态文字（读取中 / 刷新失败 / 查询失败）。
@@ -48,4 +48,4 @@ dsh plugin --profile web add @iasiv5/dsh-quota-watch
 
 ## English summary
 
-DSH Quota Watch is a personal DSH Web sidebar card for GLM Coding Plan windows and GitHub Copilot's provider-reported quota snapshot. It resolves credentials on every host-side probe, sends only normalized values to the browser, keeps no usage history, and never infers a Copilot balance from credits used. The Copilot endpoint is undocumented and may change; invalid or unlimited quota snapshots are shown as unavailable rather than guessed.
+DSH Quota Watch is a personal DSH Web sidebar card for GLM Coding Plan windows and GitHub Copilot's provider-reported quota snapshot. It resolves credentials on every host-side probe, sends only normalized values to the browser, keeps no usage history, and never infers a Copilot balance from credits used. When the sidebar is collapsed, a 36px control with a 16px quota-gauge icon replaces the text card; clicking it opens provider summaries and details. The icon uses DSH semantic theme tokens and has no permanent border or alert badge. The Copilot endpoint is undocumented and may change; invalid or unlimited quota snapshots are shown as unavailable rather than guessed.

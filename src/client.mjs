@@ -10,6 +10,9 @@ const FETCH_TIMEOUT_MS = 15_000
 const COPY = {
   zh: {
     title: '套餐监控',
+    openDetails: '查看详情',
+    backToOverview: '返回额度概览',
+    providerNames: { glm: 'GLM', copilot: 'Copilot' },
     refresh: '刷新',
     loading: '读取中',
     failed: '查询失败',
@@ -34,6 +37,9 @@ const COPY = {
   },
   en: {
     title: 'Quota Watch',
+    openDetails: 'View details',
+    backToOverview: 'Back to quota overview',
+    providerNames: { glm: 'GLM', copilot: 'Copilot' },
     refresh: 'Refresh',
     loading: 'Loading',
     failed: 'Query failed',
@@ -81,10 +87,26 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dqw-rail-trigger { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-primary, inherit); cursor: pointer; transition: background-color .12s, color .12s; }
+.dqw-rail-trigger svg { display: block; width: 16px; height: 16px; }
+.dqw-rail-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-rail-trigger:active:not(:disabled), .dqw-rail-trigger[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.18)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-rail-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
+[data-dsh-frame][data-sidebar-collapsed] [data-dsh-quota-watch-card] { display: flex; align-items: center; justify-content: center; width: 36px; margin: 0 0 12px; }
+[data-dsh-frame][data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-card { display: none; }
+[data-dsh-frame][data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-rail-trigger { display: inline-flex; }
 .dqw-pop { position: fixed; z-index: 2147483000; min-width: 166px; max-width: 320px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-pop { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
 .dqw-pop[hidden] { display: none; }
 .dqw-pop *, .dqw-pop *::before, .dqw-pop *::after { box-sizing: border-box; }
+.dqw-pop-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; }
+.dqw-pop-back { align-self: flex-start; margin: 0; padding: 3px 5px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); font: inherit; font-size: 10.5px; line-height: 14px; cursor: pointer; }
+.dqw-pop-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
+.dqw-overview-row { display: flex; align-items: center; width: 100%; gap: 6px; margin: 0; padding: 5px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.dqw-overview-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
+.dqw-overview-row:focus-visible { outline: 1px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: -1px; }
+.dqw-overview-error { display: flex; align-items: center; gap: 6px; padding: 5px 4px; }
 .dqw-bignums { display: flex; gap: 6px; }
 .dqw-big { flex: 1; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); border-radius: 8px; padding: 5px 8px; }
 .dqw-big .dqw-big-value { font-size: 15px; font-weight: 650; line-height: 19px; font-variant-numeric: tabular-nums; }
@@ -145,6 +167,33 @@ function text(doc, tag, className, value) {
   if (className) node.className = className
   node.textContent = String(value ?? '')
   return node
+}
+
+function quotaIcon(doc) {
+  const namespace = 'http://www.w3.org/2000/svg'
+  const svg = doc.createElementNS(namespace, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('width', '16')
+  svg.setAttribute('height', '16')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', '1.7')
+  svg.setAttribute('stroke-linecap', 'round')
+  svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+  const arc = doc.createElementNS(namespace, 'path')
+  arc.setAttribute('d', 'M4 17a8 8 0 0 1 16 0')
+  const needle = doc.createElementNS(namespace, 'path')
+  needle.setAttribute('d', 'm12 17 3.2-5.2')
+  const hub = doc.createElementNS(namespace, 'circle')
+  hub.setAttribute('cx', '12')
+  hub.setAttribute('cy', '17')
+  hub.setAttribute('r', '1')
+  hub.setAttribute('fill', 'currentColor')
+  hub.setAttribute('stroke', 'none')
+  svg.append(arc, needle, hub)
+  return svg
 }
 
 /** Aligned label/value line used by the simplified Copilot detail. */
@@ -228,6 +277,15 @@ export function mountQuotaCard({
   const card = doc.createElement('section')
   card.className = 'dqw-card'
   card.setAttribute('aria-label', copy.title)
+  const railTrigger = doc.createElement('button')
+  railTrigger.type = 'button'
+  railTrigger.className = 'dqw-rail-trigger'
+  railTrigger.title = copy.title
+  railTrigger.setAttribute('aria-label', copy.title)
+  railTrigger.setAttribute('aria-haspopup', 'dialog')
+  railTrigger.setAttribute('aria-controls', 'dqw-quota-watch-pop')
+  railTrigger.setAttribute('aria-expanded', 'false')
+  railTrigger.append(quotaIcon(doc))
   const body = doc.createElement('div')
   body.className = 'dqw-body'
   // Status line doubles as the transport-error surface; hidden once data renders.
@@ -235,10 +293,12 @@ export function mountQuotaCard({
   lastUpdated.dataset.role = 'updated'
   body.append(lastUpdated)
   card.append(body)
-  container.append(style, card)
-  // Details open in a fixed-position panel to the right of the rows.
+  container.append(style, card, railTrigger)
+  // Details and collapsed-rail summaries open in a viewport-level panel.
   const pop = doc.createElement('div')
   pop.className = 'dqw-pop'
+  pop.id = 'dqw-quota-watch-pop'
+  pop.setAttribute('role', 'dialog')
   pop.dataset.dshQuotaWatchPop = ''
   pop.hidden = true
   doc.body.append(pop)
@@ -248,6 +308,7 @@ export function mountQuotaCard({
   let disposed = false
   let queuedPlace = false
   let openKey
+  let popOrigin = 'row'
 
   const fillClass = (percent) => (percent > 95 ? 'dqw-bar-fill danger' : percent > 80 ? 'dqw-bar-fill warn' : 'dqw-bar-fill')
 
@@ -299,8 +360,75 @@ export function mountQuotaCard({
     return [row]
   }
 
-  function renderDetail(detail, key, provider) {
+  const renderOverviewProvider = (key, model) => {
+    if (model === null) return null
+    const label = text(doc, 'span', 'dqw-label', model.label)
+    if (model.kind === 'error') {
+      const row = doc.createElement('div')
+      row.className = 'dqw-overview-error'
+      row.append(label, text(doc, 'span', 'dqw-errtext', model.error ? `${copy.failed}: ${model.error}` : copy.failed))
+      return row
+    }
+    const row = doc.createElement('button')
+    row.type = 'button'
+    row.className = 'dqw-overview-row'
+    row.dataset.dshQuotaWatchPopProvider = key
+    row.setAttribute('aria-expanded', 'false')
+    row.setAttribute('aria-label', `${model.label} · ${typeof model.percent === 'number' ? formatPercent(model.percent, locale) : '—'} · ${copy.openDetails}`)
+    row.append(label)
+    if (typeof model.percent === 'number' && Number.isFinite(model.percent)) {
+      const bar = doc.createElement('span')
+      bar.className = 'dqw-bar'
+      bar.setAttribute('role', 'progressbar')
+      bar.setAttribute('aria-valuemin', '0')
+      bar.setAttribute('aria-valuemax', '100')
+      bar.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, model.percent))))
+      const fill = text(doc, 'span', fillClass(model.percent))
+      fill.style.width = `${Math.max(0, Math.min(100, model.percent))}%`
+      bar.append(fill)
+      row.append(bar)
+    }
+    if (model.stale) {
+      const mark = text(doc, 'span', 'dqw-stale-mark', '⚠')
+      mark.dataset.dshQuotaWatchStale = ''
+      mark.title = model.error ?? copy.stale
+      row.append(mark)
+    }
+    row.append(text(doc, 'span', 'dqw-pct', typeof model.percent === 'number' ? formatPercent(model.percent, locale) : '—'))
+    row.append(text(doc, 'span', 'dqw-chev', '▸'))
+    return row
+  }
+
+  const renderOverview = () => {
+    pop.replaceChildren(text(doc, 'p', 'dqw-pop-title', copy.title))
+    const providers = snapshot?.providers ?? []
+    const glm = providers.find((provider) => provider?.key === 'glm')
+    const copilot = providers.find((provider) => provider?.key === 'copilot')
+    const rows = [
+      renderOverviewProvider('glm', glmRowModel(glm)),
+      renderOverviewProvider('copilot', copilotRowModel(copilot)),
+    ].filter(Boolean)
+    if (rows.length === 0) {
+      pop.append(text(doc, 'p', 'dqw-muted', lastUpdated.textContent || copy.loading))
+      return
+    }
+    const list = doc.createElement('div')
+    list.className = 'dqw-overview-list'
+    list.append(...rows)
+    pop.append(list)
+  }
+
+  function renderDetail(detail, key, provider, fromRail = false) {
     detail.replaceChildren()
+    if (fromRail) {
+      const back = doc.createElement('button')
+      back.type = 'button'
+      back.className = 'dqw-pop-back'
+      back.dataset.action = 'back-to-overview'
+      back.setAttribute('aria-label', copy.backToOverview)
+      back.textContent = copy.backToOverview
+      detail.append(back, text(doc, 'p', 'dqw-pop-title', copy.providerNames[key]))
+    }
     if (provider?.status === 'stale') {
       detail.append(text(doc, 'p', 'dqw-error', `${copy.stale}${provider.error ? `: ${provider.error}` : ''}`))
     }
@@ -401,12 +529,14 @@ export function mountQuotaCard({
     }
   }
 
-  /** Keep the detail panel anchored to the expanded row's right edge. */
+  /** Anchor the popover to the rail icon or the expanded provider row. */
   const positionPop = () => {
     if (pop.hidden || openKey === undefined) return
-    const row = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
-    if (!row) return
-    const rect = row.getBoundingClientRect()
+    const anchor = popOrigin === 'rail'
+      ? railTrigger
+      : body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
+    if (!anchor) return
+    const rect = anchor.getBoundingClientRect()
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
     const width = pop.offsetWidth || 240
@@ -421,24 +551,35 @@ export function mountQuotaCard({
   }
 
   const syncPop = () => {
+    const fromRail = popOrigin === 'rail' && openKey !== undefined && !disposed
+    railTrigger.setAttribute('aria-expanded', String(fromRail))
     if (openKey === undefined || disposed) {
-      if (!pop.hidden) {
-        pop.hidden = true
-        pop.replaceChildren()
-        delete pop.dataset.dshQuotaWatchDetail
-      }
+      pop.hidden = true
+      pop.replaceChildren()
+      delete pop.dataset.dshQuotaWatchDetail
+      delete pop.dataset.dshQuotaWatchOverview
+      return
+    }
+    if (openKey === 'overview') {
+      renderOverview()
+      delete pop.dataset.dshQuotaWatchDetail
+      pop.dataset.dshQuotaWatchOverview = ''
+      pop.setAttribute('aria-label', copy.title)
+      pop.hidden = false
+      positionPop()
       return
     }
     const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
     const row = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
-    if (!provider || !row || !row.hasAttribute('data-expandable')) {
+    if (!provider || (!fromRail && (!row || !row.hasAttribute('data-expandable')))) {
       openKey = undefined
       syncPop()
       return
     }
-    renderDetail(pop, openKey, provider)
+    renderDetail(pop, openKey, provider, fromRail)
     pop.dataset.dshQuotaWatchDetail = openKey
-    pop.setAttribute('aria-label', openKey === 'glm' ? 'GLM' : 'Copilot')
+    delete pop.dataset.dshQuotaWatchOverview
+    pop.setAttribute('aria-label', fromRail ? `${copy.providerNames[openKey]} · ${copy.title}` : copy.providerNames[openKey])
     pop.hidden = false
     positionPop()
   }
@@ -506,8 +647,27 @@ export function mountQuotaCard({
     })
   }
 
-  const observer = new win.MutationObserver(schedulePlace)
-  observer.observe(doc.body, { childList: true, subtree: true })
+  let sidebarCollapsed = Boolean(doc.querySelector('[data-dsh-frame][data-sidebar-collapsed]'))
+  const syncSidebarMode = () => {
+    const nextCollapsed = Boolean(doc.querySelector('[data-dsh-frame][data-sidebar-collapsed]'))
+    if (nextCollapsed === sidebarCollapsed) return
+    sidebarCollapsed = nextCollapsed
+    if (openKey !== undefined) {
+      openKey = undefined
+      popOrigin = 'row'
+      syncPop()
+    }
+  }
+  const observer = new win.MutationObserver(() => {
+    syncSidebarMode()
+    schedulePlace()
+  })
+  observer.observe(doc.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['data-sidebar-collapsed'],
+  })
   place()
 
   const startPolling = () => {
@@ -524,8 +684,33 @@ export function mountQuotaCard({
     else startPolling()
   }
   const toggleRow = (key) => {
+    popOrigin = 'row'
     openKey = openKey === key ? undefined : key
     renderAll()
+  }
+  const onRailClick = () => {
+    if (popOrigin === 'rail' && openKey !== undefined) {
+      openKey = undefined
+      popOrigin = 'row'
+    } else {
+      openKey = 'overview'
+      popOrigin = 'rail'
+    }
+    syncPop()
+  }
+  const onPopClick = (event) => {
+    if (event.target?.closest?.('[data-action="back-to-overview"]')) {
+      openKey = 'overview'
+      popOrigin = 'rail'
+      syncPop()
+      return
+    }
+    const provider = event.target?.closest?.('[data-dsh-quota-watch-pop-provider]')
+    if (provider) {
+      openKey = provider.dataset.dshQuotaWatchPopProvider
+      popOrigin = 'rail'
+      syncPop()
+    }
   }
   const onBodyClick = (event) => {
     if (event.target?.closest?.('[data-action="refresh"]')) {
@@ -548,6 +733,7 @@ export function mountQuotaCard({
     const target = event.target
     if (pop.contains(target) || target?.closest?.('[data-dsh-quota-watch-row]') || target?.closest?.(CARD_SELECTOR)) return
     openKey = undefined
+    popOrigin = 'row'
     renderAll()
   }
   const onDocScroll = () => { positionPop() }
@@ -555,11 +741,14 @@ export function mountQuotaCard({
   const onDocKeydown = (event) => {
     if (event.key === 'Escape' && openKey !== undefined) {
       openKey = undefined
+      popOrigin = 'row'
       renderAll()
     }
   }
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
+  railTrigger.addEventListener('click', onRailClick)
+  pop.addEventListener('click', onPopClick)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
   doc.addEventListener('scroll', onDocScroll, true)
@@ -578,6 +767,8 @@ export function mountQuotaCard({
     win.removeEventListener('resize', onWinResize)
     body.removeEventListener('click', onBodyClick)
     body.removeEventListener('keydown', onBodyKeydown)
+    railTrigger.removeEventListener('click', onRailClick)
+    pop.removeEventListener('click', onPopClick)
     container.remove()
     pop.remove()
   }
