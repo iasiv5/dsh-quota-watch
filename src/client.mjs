@@ -18,13 +18,18 @@ const COPY = {
     available: '可用额度',
     used: '本期已用',
     reset: '重置',
-    todayTokens: '今日 tokens',
+    resetTime: '重置时间',
+    windowUsed: '已用',
+    todayTokens: '今日 Tokens',
     todayCalls: '调用次数',
+    weekUnlimited: '每周额度',
+    unlimited: '♾️',
+    unlimitedNote: '（无限）',
     windows: {
-      '5h': '5 小时窗口 · 已用',
-      week: '每周窗口 · 已用',
-      month: '每月窗口 · 已用',
-      mcp: 'MCP（月）· 已用',
+      '5h': '5 小时额度',
+      week: '每周额度',
+      month: '每月额度',
+      mcp: 'MCP（月）',
     },
   },
   en: {
@@ -37,13 +42,18 @@ const COPY = {
     available: 'Available credits',
     used: 'Used this cycle',
     reset: 'Resets',
+    resetTime: 'Reset time',
+    windowUsed: 'used',
     todayTokens: 'Today tokens',
     todayCalls: 'Calls',
+    weekUnlimited: 'Weekly quota',
+    unlimited: '♾️',
+    unlimitedNote: ' (unlimited)',
     windows: {
-      '5h': '5-hour window · used',
-      week: 'Weekly window · used',
-      month: 'Monthly window · used',
-      mcp: 'MCP (month) · used',
+      '5h': '5-hour quota',
+      week: 'Weekly quota',
+      month: 'Monthly quota',
+      mcp: 'MCP (month)',
     },
   },
 }
@@ -87,8 +97,12 @@ const STYLE_TEXT = `
 .dqw-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
 .dqw-kv-label { flex: none; opacity: .65; }
 .dqw-kv-value { min-width: 0; text-align: right; font-weight: 600; }
-.dqw-kv-pct { display: inline-block; min-width: 30px; text-align: right; }
-.dqw-kv-sub { font-weight: 400; opacity: .55; font-size: 9.5px; }
+.dqw-kv-sub { font-weight: 400; opacity: .55; }
+.dqw-wins { display: grid; grid-template-columns: max-content max-content max-content max-content 1fr; column-gap: 6px; row-gap: 3px; align-items: baseline; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
+.dqw-win-name { opacity: .65; }
+.dqw-win-mid { opacity: .65; white-space: nowrap; }
+.dqw-win-used { opacity: .65; white-space: nowrap; }
+.dqw-win-val { min-width: 0; font-weight: 600; }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
 `
 
@@ -308,24 +322,47 @@ export function mountQuotaCard({
       )
       numbers.append(tokensBig, callsBig)
       detail.append(numbers)
-      for (const window of provider?.plan?.windows ?? []) {
-        const label = copy.windows[window?.key] ?? window?.key
-        const percent = typeof window?.percent === 'number' && Number.isFinite(window.percent) ? window.percent : undefined
-        const reset = formatTime(window?.resetsAt, locale)
-        if (percent === undefined && !reset) {
-          detail.append(text(doc, 'p', 'dqw-muted', label))
+      const raw = Array.isArray(provider?.plan?.windows) ? provider.plan.windows : []
+      // Fixed display order (MCP, 5h, month, week); the weekly window shows an
+      // unlimited placeholder until the provider starts reporting one.
+      const order = { mcp: 0, '5h': 1, month: 2, week: 3 }
+      const sorted = [...raw].sort((a, b) => (order[a?.key] ?? 99) - (order[b?.key] ?? 99))
+      const items = []
+      let weekPlaced = false
+      for (const window of sorted) {
+        if (!weekPlaced && (order[window?.key] ?? 99) > order.week) {
+          items.push({ placeholder: true })
+          weekPlaced = true
+        }
+        if (window?.key === 'week') weekPlaced = true
+        items.push({ window })
+      }
+      if (!weekPlaced) items.push({ placeholder: true })
+      // One grid keeps the name, ·, used/♾️, percent and weak-note columns aligned
+      // across all window rows.
+      const wins = doc.createElement('div')
+      wins.className = 'dqw-wins'
+      for (const item of items) {
+        if (item.placeholder) {
+          wins.append(
+            text(doc, 'span', 'dqw-win-name', copy.weekUnlimited),
+            text(doc, 'span', 'dqw-win-mid', '·'),
+            text(doc, 'span', 'dqw-win-used', copy.unlimited),
+            text(doc, 'span', ''),
+            text(doc, 'span', 'dqw-kv-sub', copy.unlimitedNote),
+          )
           continue
         }
-        const row = doc.createElement('div')
-        row.className = 'dqw-kv'
-        const value = doc.createElement('span')
-        value.className = 'dqw-kv-value'
-        // Fixed-width percent slot keeps the parenthesized reset times vertically aligned.
-        if (percent !== undefined) value.append(text(doc, 'span', 'dqw-kv-pct', formatPercent(percent, locale)))
-        if (reset) value.append(text(doc, 'span', 'dqw-kv-sub', `（${copy.reset}: ${reset}）`))
-        row.append(text(doc, 'span', 'dqw-kv-label', label), value)
-        detail.append(row)
+        const window = item.window
+        const percent = typeof window?.percent === 'number' && Number.isFinite(window.percent) ? window.percent : undefined
+        const reset = formatTime(window?.resetsAt, locale)
+        wins.append(text(doc, 'span', 'dqw-win-name', copy.windows[window?.key] ?? window?.key))
+        wins.append(text(doc, 'span', 'dqw-win-mid', '·'))
+        wins.append(text(doc, 'span', 'dqw-win-used', copy.windowUsed))
+        wins.append(text(doc, 'span', 'dqw-win-val', percent !== undefined ? formatPercent(percent, locale) : '—'))
+        wins.append(text(doc, 'span', 'dqw-kv-sub', reset ? `（${copy.reset}: ${reset}）` : ''))
       }
+      detail.append(wins)
       if (Array.isArray(usage?.models) && usage.models.length > 0) {
         const models = doc.createElement('div')
         models.className = 'dqw-models'
@@ -347,13 +384,18 @@ export function mountQuotaCard({
       detail.append(kvRow(doc, copy.available, `${formatNumber(quota.remaining, locale)} / ${formatNumber(quota.entitlement, locale)}`))
       const used = remainingToUsed(quota.percentRemaining)
       if (typeof quota.creditsUsed === 'number' && quota.creditsUsed >= 0) {
-        const usedText = used !== undefined
-          ? `${formatNumber(quota.creditsUsed, locale)} · ${formatPercent(used, locale)}`
-          : formatNumber(quota.creditsUsed, locale)
-        detail.append(kvRow(doc, copy.used, usedText))
+        const row = doc.createElement('div')
+        row.className = 'dqw-kv'
+        const value = doc.createElement('span')
+        value.className = 'dqw-kv-value'
+        value.append(text(doc, 'span', '', formatNumber(quota.creditsUsed, locale)))
+        // The percent duplicates the summary bar, so render it weakened.
+        if (used !== undefined) value.append(text(doc, 'span', 'dqw-kv-sub', ` · ${formatPercent(used, locale)}`))
+        row.append(text(doc, 'span', 'dqw-kv-label', copy.used), value)
+        detail.append(row)
       }
       const reset = formatTime(quota?.resetsAt, locale)
-      if (reset) detail.append(kvRow(doc, copy.reset, reset))
+      if (reset) detail.append(kvRow(doc, copy.resetTime, reset))
     } else {
       detail.append(text(doc, 'p', 'dqw-muted', copy.stale))
     }
