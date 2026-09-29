@@ -1,5 +1,5 @@
 import { credentialKey, credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
-import { buildCopilotProbe, buildGlmProbe, parseCopilotUser, parseGlmPlan } from './core/adapters.mjs'
+import { buildCopilotProbe, buildGlmProbe, buildGlmUsageProbe, parseCopilotUser, parseGlmPlan, parseGlmUsage, usageDayWindow } from './core/adapters.mjs'
 import {
   DEFAULT_POLL_INTERVAL_SEC,
   MAX_POLL_INTERVAL_SEC,
@@ -133,6 +133,7 @@ export function createQuotaService(ctx, options = {}) {
           ...(provider.error !== undefined ? { error: provider.error } : {}),
           ...(provider.plan !== undefined ? { plan: provider.plan } : {}),
           ...(provider.quota !== undefined ? { quota: provider.quota } : {}),
+          ...(provider.usage !== undefined ? { usage: provider.usage } : {}),
         }
       }),
     }
@@ -158,6 +159,52 @@ export function createQuotaService(ctx, options = {}) {
       updatedAt: at,
       checkedAt: at,
       ...payload,
+    })
+  }
+
+  function markGlmPlanSuccess(plan) {
+    const previous = providers.get('glm')
+    const at = now()
+    providers.set('glm', {
+      key: 'glm',
+      displayName: 'GLM Coding Plan',
+      status: 'ready',
+      credential: 'configured',
+      updatedAt: at,
+      checkedAt: at,
+      plan,
+      ...(previous?.usage !== undefined ? { usage: previous.usage } : {}),
+    })
+  }
+
+  function markGlmUsageSuccess(usage) {
+    const previous = providers.get('glm')
+    if (previous === undefined || previous.key !== 'glm') return
+    const at = now()
+    providers.set('glm', {
+      ...previous,
+      status: 'ready',
+      credential: 'configured',
+      updatedAt: at,
+      checkedAt: at,
+      usage: { status: 'ready', updatedAt: at, ...usage },
+    })
+  }
+
+  function markGlmUsageFailure(error) {
+    const previous = providers.get('glm')
+    if (previous === undefined || previous.key !== 'glm') return
+    const lastGood = previous.usage?.status === 'ready' || previous.usage?.status === 'stale'
+      ? previous.usage
+      : undefined
+    providers.set('glm', {
+      ...previous,
+      checkedAt: now(),
+      usage: {
+        ...(lastGood !== undefined ? lastGood : {}),
+        status: lastGood !== undefined ? 'stale' : 'error',
+        error: safeProbeError(error),
+      },
     })
   }
 
@@ -206,9 +253,26 @@ export function createQuotaService(ctx, options = {}) {
       const { status, body } = await fetchBody(spec)
       const plan = parseGlmPlan(status, body)
       if (plan === undefined) throw Object.assign(new Error(), { code: 'UNRECOGNIZED_RESPONSE' })
-      markSuccess('glm', 'GLM Coding Plan', { plan })
+      markGlmPlanSuccess(plan)
     } catch (error) {
       markFailure('glm', 'GLM Coding Plan', error)
+      return
+    }
+    await probeGlmUsage(provider, apiKey)
+  }
+
+  async function probeGlmUsage(provider, apiKey) {
+    const window = usageDayWindow(new Date(now()))
+    if (window === undefined) return
+    try {
+      const spec = buildGlmUsageProbe({ provider, apiKey, startTime: window.startTime, endTime: window.endTime })
+      if (spec === undefined) throw Object.assign(new Error(), { code: 'UNRECOGNIZED_RESPONSE' })
+      const { status, body } = await fetchBody(spec)
+      const usage = parseGlmUsage(status, body)
+      if (usage === undefined) throw Object.assign(new Error(), { code: 'UNRECOGNIZED_RESPONSE' })
+      markGlmUsageSuccess(usage)
+    } catch (error) {
+      markGlmUsageFailure(error)
     }
   }
 

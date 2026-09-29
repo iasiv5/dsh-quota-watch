@@ -25,8 +25,9 @@
       },
       {
         "type": "TIME_LIMIT",
-        "unit": 3,
-        "percentage": 99
+        "unit": 5,
+        "percentage": 99,
+        "nextResetTime": "2026-11-01T00:00:00.000Z"
       }
     ]
   }

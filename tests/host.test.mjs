@@ -7,7 +7,14 @@ import { createQuotaService, makeOverviewRoute, makeRefreshRoute } from '../src/
 
 const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const glmBody = JSON.parse(await readFile(resolve(fixtureDir, 'glm-plan-response.json'), 'utf8'))
+const glmUsageBody = JSON.parse(await readFile(resolve(fixtureDir, 'glm-model-usage-response.json'), 'utf8'))
 const copilotBody = JSON.parse(await readFile(resolve(fixtureDir, 'copilot-user-response.json'), 'utf8'))
+
+function providerBody(url) {
+  if (url.includes('model-usage')) return glmUsageBody
+  if (url.includes('bigmodel.cn')) return glmBody
+  return copilotBody
+}
 
 function makeContext({ glmKey = 'synthetic-glm-key', githubOAuth = 'synthetic-github-oauth' } = {}) {
   return {
@@ -30,8 +37,7 @@ test('one refresh probes both providers with current secrets and returns only no
   const context = makeContext()
   const fetchImpl = async (url, init) => {
     seen.push({ url, headers: Object.fromEntries(new Headers(init.headers).entries()) })
-    const body = url.includes('bigmodel.cn') ? glmBody : copilotBody
-    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
   const service = createQuotaService(context, { fetchImpl, now: () => 1_800_000_000_000 })
 
@@ -41,11 +47,16 @@ test('one refresh probes both providers with current secrets and returns only no
   const copilot = overview.providers.find((provider) => provider.key === 'copilot')
 
   assert.equal(glm.status, 'ready')
-  assert.equal(glm.plan.windows.length, 3)
+  assert.equal(glm.plan.windows.length, 4)
+  assert.equal(glm.usage.status, 'ready')
+  assert.equal(glm.usage.totalTokens, 8300000)
+  assert.equal(glm.usage.totalCalls, 152)
+  assert.equal(glm.usage.models.length, 2)
   assert.equal(copilot.status, 'ready')
   assert.equal(copilot.quota.remaining, 7600)
-  assert.equal(seen.length, 2)
-  assert.equal(seen.find((request) => request.url.includes('bigmodel.cn')).headers.authorization, 'synthetic-glm-key')
+  assert.equal(seen.length, 3)
+  assert.ok(seen.find((request) => request.url.includes('model-usage')).url.includes('startTime='))
+  assert.equal(seen.find((request) => request.url.includes('bigmodel.cn') && !request.url.includes('model-usage')).headers.authorization, 'synthetic-glm-key')
   assert.equal(seen.find((request) => request.url.includes('api.github.com')).headers.authorization, 'Bearer synthetic-github-oauth')
   assert.equal(JSON.stringify(overview).includes('synthetic-glm-key'), false)
   assert.equal(JSON.stringify(overview).includes('synthetic-github-oauth'), false)
@@ -61,7 +72,7 @@ test('later refresh resolves rotated credentials instead of reusing old values',
   context.credentials.readRecord = async () => ({ kind: 'grant', payload: { type: 'oauth', refresh: githubOAuth, access: 'synthetic-access' } })
   const fetchImpl = async (url, init) => {
     seen.push({ url, authorization: new Headers(init.headers).get('authorization') })
-    return new Response(JSON.stringify(url.includes('bigmodel.cn') ? glmBody : copilotBody), { status: 200 })
+    return new Response(JSON.stringify(providerBody(url)), { status: 200 })
   }
   const service = createQuotaService(context, { fetchImpl })
 
@@ -70,8 +81,11 @@ test('later refresh resolves rotated credentials instead of reusing old values',
   githubOAuth = 'synthetic-github-rotated'
   await service.refresh()
 
-  assert.equal(seen.filter((request) => request.url.includes('bigmodel.cn'))[1].authorization, 'synthetic-glm-rotated')
-  assert.equal(seen.filter((request) => request.url.includes('api.github.com'))[1].authorization, 'Bearer synthetic-github-rotated')
+  const bigmodelRequests = seen.filter((request) => request.url.includes('bigmodel.cn'))
+  assert.equal(bigmodelRequests.length, 4)
+  assert.equal(bigmodelRequests.at(-1).authorization, 'synthetic-glm-rotated')
+  assert.equal(bigmodelRequests.at(-2).authorization, 'synthetic-glm-rotated')
+  assert.equal(seen.filter((request) => request.url.includes('api.github.com')).at(-1).authorization, 'Bearer synthetic-github-rotated')
 })
 
 test('probe failures retain last-good quota and report stale status without clearing values', async () => {
@@ -79,7 +93,7 @@ test('probe failures retain last-good quota and report stale status without clea
   const context = makeContext()
   const fetchImpl = async (url) => {
     if (failing) return new Response('{}', { status: 503 })
-    return new Response(JSON.stringify(url.includes('bigmodel.cn') ? glmBody : copilotBody), { status: 200 })
+    return new Response(JSON.stringify(providerBody(url)), { status: 200 })
   }
   const service = createQuotaService(context, { fetchImpl })
   await service.refresh()
@@ -90,11 +104,49 @@ test('probe failures retain last-good quota and report stale status without clea
   const glm = overview.providers.find((provider) => provider.key === 'glm')
   const copilot = overview.providers.find((provider) => provider.key === 'copilot')
   assert.equal(glm.status, 'stale')
-  assert.equal(glm.plan.windows.length, 3)
+  assert.equal(glm.plan.windows.length, 4)
   assert.equal(copilot.status, 'stale')
   assert.equal(copilot.quota.remaining, 7600)
   assert.ok(glm.error)
   assert.ok(copilot.error)
+})
+
+test('usage probe failure keeps the plan ready and degrades only the usage block', async () => {
+  let usageFailing = false
+  const context = makeContext()
+  const fetchImpl = async (url) => {
+    if (usageFailing && url.includes('model-usage')) return new Response('{}', { status: 500 })
+    return new Response(JSON.stringify(providerBody(url)), { status: 200 })
+  }
+  const service = createQuotaService(context, { fetchImpl })
+  await service.refresh()
+  usageFailing = true
+  await service.refresh()
+
+  const glm = service.overview().providers.find((provider) => provider.key === 'glm')
+  assert.equal(glm.status, 'ready')
+  assert.equal(glm.plan.windows.length, 4)
+  assert.equal(glm.usage.status, 'stale')
+  assert.equal(glm.usage.totalTokens, 8300000)
+  assert.ok(glm.usage.error)
+  assert.ok(glm.error === undefined)
+})
+
+test('usage probe failure without last-good data reports an error block, not a ready usage', async () => {
+  const context = makeContext()
+  const fetchImpl = async (url) => new Response(
+    JSON.stringify(url.includes('model-usage') ? { success: false } : providerBody(url)),
+    { status: 200 },
+  )
+  const service = createQuotaService(context, { fetchImpl })
+  await service.refresh()
+
+  const glm = service.overview().providers.find((provider) => provider.key === 'glm')
+  assert.equal(glm.status, 'ready')
+  assert.equal(glm.plan.windows.length, 4)
+  assert.equal(glm.usage.status, 'error')
+  assert.equal(glm.usage.totalTokens, undefined)
+  assert.ok(glm.usage.error)
 })
 
 test('missing credentials are reported without making provider requests', async () => {

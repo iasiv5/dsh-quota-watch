@@ -1,0 +1,19 @@
+{
+  "code": 200,
+  "msg": "Operation successful",
+  "success": true,
+  "data": {
+    "x_time": ["2026-09-29 00:00", "2026-09-29 01:00"],
+    "modelCallCount": [150, 2],
+    "tokensUsage": [8278600, 21400],
+    "totalUsage": {
+      "totalModelCallCount": 152,
+      "totalTokensUsage": 8300000,
+      "modelSummaryList": [
+        { "modelName": "GLM-5.3", "totalTokens": 21400, "sortOrder": 1 },
+        { "modelName": "GLM-5.3-Flash", "totalTokens": 8278600, "sortOrder": 2 }
+      ]
+    },
+    "granularity": "hourly"
+  }
+}

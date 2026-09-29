@@ -28,11 +28,12 @@ test('sensitive local credential and backup paths are forbidden from public file
   assert.equal(isSensitivePath('src/host.mjs'), false)
 })
 
-test('project ignore rules protect local npm credentials and maintainer plans', async () => {
+test('project ignore rules protect local npm credentials', async () => {
   const ignore = await readFile(resolve(root, '.gitignore'), 'utf8')
   assert.match(ignore, /^\.npmrc$/m)
   assert.match(ignore, /^\.credentials\.yaml$/m)
-  assert.match(ignore, /^docs\/plans\/$/m)
+  assert.match(ignore, /^\.env(\.\*)?$/m)
+  assert.doesNotMatch(ignore, /^docs\/plans\/$/m)
 })
 
 test('pack manifest parser supports npm 11 array and npm 12 keyed-object output', () => {

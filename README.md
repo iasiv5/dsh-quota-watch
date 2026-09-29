@@ -6,11 +6,12 @@
 
 ## 功能
 
-- 在侧栏 Settings 行上方显示一个可折叠卡片；没有单独的设置分区。
-- GLM Coding Plan：展示套餐名、5 小时 / 每周 / 每月窗口、已用百分比、进度条和重置时间；兼容 Token / Credit 套餐，忽略 MCP `TIME_LIMIT`。
-- GitHub Copilot：读取 `premium_interactions` quota snapshot；只有 GitHub 返回有限、有效的 `remaining` 时才显示可用额度和百分比。若余额字段无效或账号被标记为 unlimited，则显示“余额暂不可用”；`credits_used` 如存在会单独标为已用量，绝不用于推算余额。
-- 宿主默认每 60 秒探测；profile patch 可将 `pollIntervalSec` 设置在 30–3600 秒。浏览器页签可见时每 30 秒刷新视图，隐藏时暂停；刷新按钮可立即请求宿主探测。
-- 探测失败时保留最后一次成功数据并标记可能过期；缺少凭据时显示未配置状态。
+- 在侧栏 Settings 行上方显示一张常显摘要卡（无折叠按钮）：GLM 与 GitHub Copilot 各占一行，统一显示**已用百分比**（Copilot 为 `100 − percent_remaining` 的单值反转），已用超过 80% 进度条转橙、超过 95% 转红。
+- GLM 摘要行固定显示 5 小时窗口已用百分比，行尾小字为当日 token 用量；点击行展开详情：今日 tokens / 调用次数双大数字、全部窗口（5 小时 / 每周 / 每月 / MCP 月度 `TIME_LIMIT`）的百分比与重置时间、分模型用量与更新时间。同一时间至多展开一个详情。
+- GitHub Copilot 摘要行仅在 GitHub 返回有限、有效的 `remaining` 且带 `percent_remaining` 时显示；点击展开可用额度、已用百分比、`credits_used` 与重置时间。`credits_used` 绝不用于推算余额，缺失有效百分比时该行不渲染。
+- 今日 tokens / 调用次数按宿主本地时区的自然日（`00:00:00 → 当前时刻`）查询；不带滚动窗口语义。
+- 凭据缺失的 provider 不渲染摘要行（两者皆缺时整卡隐藏）；探测失败时保留最后一次成功数据并在行上加 ⚠ 过期标记。
+- 宿主默认每 60 秒探测（窗口 + 用量 + Copilot）；profile patch 可将 `pollIntervalSec` 设置在 30–3600 秒。浏览器页签可见时每 30 秒刷新视图，隐藏时暂停；刷新按钮可立即请求宿主探测。
 
 ## 兼容与配置
 
@@ -21,7 +22,7 @@
 
 ## 数据来源与语义
 
-- GLM 查询 `https://open.bigmodel.cn/api/monitor/usage/quota/limit` 或 `https://api.z.ai/api/monitor/usage/quota/limit`。该接口按 raw API key 鉴权，不加 Bearer 前缀。
+- GLM 查询 `https://open.bigmodel.cn/api/monitor/usage/quota/limit` 或 `https://api.z.ai/api/monitor/usage/quota/limit`（窗口百分比），以及同域 `/api/monitor/usage/model-usage?startTime=…&endTime=…`（今日 tokens 与调用次数，时间格式 `yyyy-MM-dd HH:mm:ss`）。两个接口均按 raw API key 鉴权，不加 Bearer 前缀。
 - Copilot 查询 `https://api.github.com/copilot_internal/user`。这是 GitHub Copilot 内部、非公开稳定契约的端点，字段可能变更；插件在无法确认额度含义时显示不可用，不猜测或计算余额。
 - 对企业 / 组织管理的 Copilot seat，GitHub AI Credits 可能属于共享计费池。侧栏呈现的是 GitHub 用户 quota snapshot 中的可用额度，不保证等同组织账单的总余额。
 - 凭据只在 DSH 宿主进程解析并用于 HTTPS 请求；浏览器只接收规范化后的额度字段。插件不把 key、OAuth grant 或原始 provider 响应写入磁盘，也不保存额度历史。

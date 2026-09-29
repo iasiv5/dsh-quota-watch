@@ -49,7 +49,7 @@ function toIso(value) {
 }
 
 function glmPercent(row, kind) {
-  if (kind === 'CREDIT_LIMIT') {
+  if (kind === 'CREDIT_LIMIT' || kind === 'TIME_LIMIT') {
     const current = asNumber(row.currentValue)
     const total = asNumber(row.usage)
     if (current !== undefined && total !== undefined && total > 0) {
@@ -74,6 +74,45 @@ export function buildGlmProbe({ provider, apiKey } = {}) {
   }
 }
 
+const GLM_USAGE_PATH = '/api/monitor/usage/model-usage'
+
+/** Build a GLM model-usage request over a formatted local-time interval. */
+export function buildGlmUsageProbe({ provider, apiKey, startTime, endTime } = {}) {
+  const host = GLM_HOSTS[provider]
+  const key = asString(apiKey)
+  const from = asString(startTime)
+  const to = asString(endTime)
+  if (host === undefined || key === undefined || from === undefined || to === undefined) return undefined
+  return {
+    url: `https://${host}${GLM_USAGE_PATH}?startTime=${encodeURIComponent(from)}&endTime=${encodeURIComponent(to)}`,
+    headers: {
+      authorization: key,
+      'accept-language': 'en-US,en',
+    },
+  }
+}
+
+/** Format a Date as the provider's local-time `yyyy-MM-dd HH:mm:ss` interval stamp. */
+export function formatGlmIntervalTime(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return undefined
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** The host-local calendar day so far, as a model-usage query interval. */
+export function usageDayWindow(now = new Date()) {
+  const end = formatGlmIntervalTime(now)
+  if (end === undefined) return undefined
+  return { startTime: `${end.slice(0, 10)} 00:00:00`, endTime: end }
+}
+
+/** Normalize a provider-reported remaining percentage to used, without other fields. */
+export function remainingToUsed(percentRemaining) {
+  const value = asNumber(percentRemaining)
+  if (value === undefined || value < 0 || value > 100) return undefined
+  return clampPercent(Math.round((100 - value) * 100) / 100)
+}
+
 /** Normalize GLM's provider-defined quota windows without relying on row order. */
 export function parseGlmPlan(status, body) {
   if (status !== 200) return undefined
@@ -87,13 +126,20 @@ export function parseGlmPlan(status, body) {
     const row = asRecord(candidate)
     if (row === undefined) continue
     const kind = asString(row.type)
-    if (kind === 'TIME_LIMIT') continue
-    if (kind !== 'TOKENS_LIMIT' && kind !== 'CREDIT_LIMIT') continue
+    if (kind !== 'TOKENS_LIMIT' && kind !== 'CREDIT_LIMIT' && kind !== 'TIME_LIMIT') continue
+    const percent = glmPercent(row, kind)
+    const resetsAt = toIso(row.nextResetTime)
+    if (kind === 'TIME_LIMIT') {
+      windows.push({
+        key: 'mcp',
+        ...(percent !== undefined ? { percent } : {}),
+        ...(resetsAt !== undefined ? { resetsAt } : {}),
+      })
+      continue
+    }
     const unit = asNumber(row.unit)
     const key = GLM_WINDOW_KEYS[unit]
     if (key === undefined) continue
-    const percent = glmPercent(row, kind)
-    const resetsAt = toIso(row.nextResetTime)
     windows.push({
       key,
       ...(percent !== undefined ? { percent } : {}),
@@ -104,6 +150,29 @@ export function parseGlmPlan(status, body) {
   if (windows.length === 0) return undefined
   const planName = asString(data.level)
   return { ...(planName !== undefined ? { planName } : {}), windows }
+}
+
+/** Normalize GLM's provider-reported usage totals for a queried interval. */
+export function parseGlmUsage(status, body) {
+  if (status !== 200) return undefined
+  const root = asRecord(body)
+  if (root?.success !== true) return undefined
+  const data = asRecord(root.data)
+  const total = asRecord(data?.totalUsage)
+  const totalTokens = asNumber(total?.totalTokensUsage)
+  const totalCalls = asNumber(total?.totalModelCallCount)
+  if (totalTokens === undefined || totalTokens < 0) return undefined
+  if (totalCalls === undefined || totalCalls < 0) return undefined
+  const list = Array.isArray(total.modelSummaryList) ? total.modelSummaryList : []
+  const models = []
+  for (const candidate of list) {
+    const row = asRecord(candidate)
+    const name = asString(row?.modelName)
+    const tokens = asNumber(row?.totalTokens)
+    if (name === undefined || tokens === undefined || tokens < 0) continue
+    models.push({ name, tokens })
+  }
+  return { totalTokens, totalCalls, ...(models.length > 0 ? { models } : {}) }
 }
 
 /** Build the Copilot user-quota request using the raw GitHub OAuth grant. */
