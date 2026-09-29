@@ -92,9 +92,9 @@ const STYLE_TEXT = `
 .dqw-rail-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-rail-trigger:active:not(:disabled), .dqw-rail-trigger[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.18)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-rail-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
-[data-dsh-frame][data-sidebar-collapsed] [data-dsh-quota-watch-card] { display: flex; align-items: center; justify-content: center; width: 36px; margin: 0 0 12px; }
-[data-dsh-frame][data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-card { display: none; }
-[data-dsh-frame][data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-rail-trigger { display: inline-flex; }
+[data-sidebar-collapsed] [data-dsh-quota-watch-card] { display: flex; align-items: center; justify-content: center; width: 36px; margin: 0 0 12px; }
+[data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-card { display: none; }
+[data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-rail-trigger { display: inline-flex; }
 .dqw-pop { position: fixed; z-index: 2147483000; min-width: 166px; max-width: 320px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-pop { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
 .dqw-pop[hidden] { display: none; }
@@ -156,10 +156,16 @@ function formatTime(value, locale) {
   if (typeof value !== 'string' || value === '') return ''
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return ''
-  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-US', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  }).format(date)
+  const dateLocale = locale === 'zh' ? 'zh-CN' : 'en-US'
+  const dateParts = new Intl.DateTimeFormat(dateLocale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+  const part = (type) => dateParts.find((item) => item.type === type)?.value ?? ''
+  const dateText = `${part('year')}/${part('month')}/${part('day')}`
+  const timeText = new Intl.DateTimeFormat(dateLocale, { timeStyle: 'short' }).format(date)
+  return `${dateText} ${timeText}`
 }
 
 function text(doc, tag, className, value) {
@@ -647,9 +653,9 @@ export function mountQuotaCard({
     })
   }
 
-  let sidebarCollapsed = Boolean(doc.querySelector('[data-dsh-frame][data-sidebar-collapsed]'))
+  let sidebarCollapsed = Boolean(doc.querySelector('[data-sidebar-collapsed]'))
   const syncSidebarMode = () => {
-    const nextCollapsed = Boolean(doc.querySelector('[data-dsh-frame][data-sidebar-collapsed]'))
+    const nextCollapsed = Boolean(doc.querySelector('[data-sidebar-collapsed]'))
     if (nextCollapsed === sidebarCollapsed) return
     sidebarCollapsed = nextCollapsed
     if (openKey !== undefined) {

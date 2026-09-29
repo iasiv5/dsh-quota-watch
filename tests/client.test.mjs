@@ -59,7 +59,7 @@ function snapshot(providers) {
 function dom({ locale, collapsed = false } = {}) {
   const collapsedAttr = collapsed ? ' data-sidebar-collapsed' : ''
   const { window } = new JSDOM(
-    `<!doctype html><html><body><div data-dsh-frame${collapsedAttr}><div class="sidebarCol"><div class="footArea"><div class="settingsArea"><button class="settings-trigger" type="button"><svg width="16" height="16"></svg></button></div></div></div></div></body></html>`,
+    `<!doctype html><html><body><div class="frame"${collapsedAttr}><div class="sidebarCol"><div class="footArea"><div class="settingsArea"><button class="settings-trigger" type="button"><svg width="16" height="16"></svg></button></div></div></div></div></body></html>`,
     { url: 'https://dsh.example/', pretendToBeVisual: true },
   )
   if (locale) {
@@ -140,7 +140,7 @@ test('collapsed rail matches the settings control and opens quota summaries', as
   assert.equal(trigger.querySelector('svg').getAttribute('height'), settingsIcon.getAttribute('height'))
   assert.equal(trigger.querySelector('svg').getAttribute('aria-hidden'), 'true')
   const styles = container.querySelector('style').textContent
-  assert.ok(styles.includes('[data-dsh-frame][data-sidebar-collapsed]'))
+  assert.ok(styles.includes('[data-sidebar-collapsed] [data-dsh-quota-watch-card]'))
   assert.ok(styles.includes('width: 36px'))
   assert.ok(styles.includes('border: 0'))
   assert.ok(styles.includes('--dsw-alias-label-primary'))
@@ -177,7 +177,7 @@ test('collapsed rail matches the settings control and opens quota summaries', as
 test('changing the sidebar mode closes a rail-anchored popover', async () => {
   const window = dom({ collapsed: true })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const frame = window.document.querySelector('[data-dsh-frame]')
+  const frame = window.document.querySelector('.frame')
   const trigger = window.document.querySelector('.dqw-rail-trigger')
   const pop = window.document.querySelector('[data-dsh-quota-watch-pop]')
   trigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
@@ -419,6 +419,7 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   assert.equal(cells[2].textContent, 'used')
   assert.match(cells[3].textContent, /1%/)
   assert.match(cells[4].textContent, /^（ Resets: .+ ）$/)
+  assert.match(cells[4].textContent, /2026\/11\/01/)
   assert.equal(cells[5].textContent, '5-hour quota')
   assert.match(cells[8].textContent, /13%/)
   assert.equal(cells[10].textContent, 'Weekly quota')
@@ -440,15 +441,18 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   window.close()
 })
 
-test('Chinese reset and unlimited notes include spacing inside parentheses', async () => {
+test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
-  const { dispose } = await mounted(window, snapshot([glmProvider()]))
+  const provider = glmProvider()
+  provider.plan.windows.find((item) => item.key === 'mcp').resetsAt = '2026-01-01T00:00:00.000Z'
+  const { dispose } = await mounted(window, snapshot([provider]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
   container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const detail = window.document.querySelector('[data-dsh-quota-watch-detail="glm"]')
   const cells = [...detail.querySelector('.dqw-wins').children]
   assert.match(cells[4].textContent, /^（ 重置: .+ ）$/)
+  assert.match(cells[4].textContent, /2026\/01\/01/)
   assert.equal(cells[14].textContent, '（ 无限 ）')
   dispose()
   window.close()
@@ -503,7 +507,7 @@ test('Copilot detail renders simplified balance, used and reset rows without a b
   assert.ok(usedSub, 'duplicate used percent renders weakened')
   assert.match(usedSub.textContent, /24%/)
   assert.match(kvRows[2].textContent, /Reset time/)
-  assert.match(kvRows[2].textContent, /11\/1\/26/)
+  assert.match(kvRows[2].textContent, /2026\/11\/01/)
   assert.equal(detail.querySelector('.dqw-bar-fill'), null, 'used bar is dropped from the detail')
   dispose()
   window.close()
