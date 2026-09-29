@@ -161,6 +161,7 @@
 
 ## 执行纪律
 
+- 本机 DSH 沙箱内 `~/.npm` 为只读，所有 `npm` 验证命令前先 `export npm_config_cache=/tmp/npmcache-dqw && mkdir -p "$npm_config_cache"`，否则 `npm pack`/`npm ci` 以 `EROFS` 失败（维护者普通 shell 无此问题）。
 - 开始实现前批判性复查本计划；发现与仓库现实不符（如宿主 API 签名变化）先修计划再动代码。
 - 按任务顺序执行，每任务跑其验证；不无声跳步。
 - 遇到接口语义不明、测试连败或需改动 DSH 宿主行为时，停下报告证据。
