@@ -88,7 +88,7 @@ const STYLE_TEXT = `
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dqw-rail-trigger { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-primary, inherit); cursor: pointer; transition: background-color .12s, color .12s; }
-.dqw-rail-trigger svg { display: block; width: 22px; height: 22px; }
+.dqw-rail-trigger svg { display: block; width: 16px; height: 16px; }
 .dqw-rail-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-rail-trigger:active:not(:disabled), .dqw-rail-trigger[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.18)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-rail-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
@@ -181,11 +181,11 @@ function quotaIcon(doc) {
   const namespace = 'http://www.w3.org/2000/svg'
   const svg = doc.createElementNS(namespace, 'svg')
   svg.setAttribute('viewBox', '0 0 24 24')
-  svg.setAttribute('width', '22')
-  svg.setAttribute('height', '22')
+  svg.setAttribute('width', '16')
+  svg.setAttribute('height', '16')
   svg.setAttribute('fill', 'none')
   svg.setAttribute('stroke', 'currentColor')
-  svg.setAttribute('stroke-width', '1.7')
+  svg.setAttribute('stroke-width', '2')
   svg.setAttribute('stroke-linecap', 'round')
   svg.setAttribute('stroke-linejoin', 'round')
   svg.setAttribute('aria-hidden', 'true')
@@ -193,15 +193,15 @@ function quotaIcon(doc) {
   const dial = doc.createElementNS(namespace, 'circle')
   dial.setAttribute('cx', '12')
   dial.setAttribute('cy', '12')
-  dial.setAttribute('r', '9')
+  dial.setAttribute('r', '10')
   const ticks = doc.createElementNS(namespace, 'path')
-  ticks.setAttribute('d', 'M12 2.7v2.1M12 19.2v2.1M2.7 12h2.1M19.2 12h2.1M5.43 5.43l1.49 1.49M17.08 17.08l1.49 1.49M18.57 5.43l-1.49 1.49M6.92 17.08l-1.49 1.49')
+  ticks.setAttribute('d', 'M12 2.4v1.6M12 20v1.6M2.4 12h1.6M20 12h1.6M5.2 5.2l1.1 1.1M18.8 18.8l-1.1-1.1M18.8 5.2l-1.1 1.1M5.2 18.8l1.1-1.1')
   const needle = doc.createElementNS(namespace, 'path')
   needle.setAttribute('d', 'M12 12l4.5-4')
   const hub = doc.createElementNS(namespace, 'circle')
   hub.setAttribute('cx', '12')
   hub.setAttribute('cy', '12')
-  hub.setAttribute('r', '1.2')
+  hub.setAttribute('r', '1.4')
   hub.setAttribute('fill', 'currentColor')
   hub.setAttribute('stroke', 'none')
   svg.append(dial, ticks, needle, hub)
