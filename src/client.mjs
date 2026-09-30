@@ -304,7 +304,7 @@ export function mountQuotaCard({
   container.dataset.dshQuotaWatchCard = ''
   container.dataset.dshPlugin = 'quota-watch'
   container.dataset.dshPart = 'sidebar-card'
-  const style = text(doc, 'style', '', STYLE_TEXT)
+  let style = text(doc, 'style', '', STYLE_TEXT)
   const card = doc.createElement('section')
   card.className = 'dqw-card'
   card.setAttribute('aria-label', copy.title)
@@ -325,6 +325,34 @@ export function mountQuotaCard({
   body.append(lastUpdated)
   card.append(body)
   container.append(style, card, railTrigger)
+  // The card carries its stylesheet in a <style> tag next to its DOM. External
+  // actors (browser extensions, aggressive theming) have been observed to strip
+  // or neuter foreign style tags while the page's styles churn (theme switches,
+  // plugin reloads, service restarts); the card then renders unstyled until a
+  // full page refresh. Two defenses:
+  //   1. mirror the rules into a constructable stylesheet (adoptedStyleSheets),
+  //      which those actors do not touch;
+  //   2. re-create the tag on every render pass that finds it dead or missing.
+  const supportsAdopted =
+    Array.isArray(doc.adoptedStyleSheets) && typeof win.CSSStyleSheet === 'function'
+  let adoptedSheet = null
+  if (supportsAdopted) {
+    try {
+      adoptedSheet = new win.CSSStyleSheet()
+      adoptedSheet.replaceSync(STYLE_TEXT)
+      doc.adoptedStyleSheets = [...doc.adoptedStyleSheets, adoptedSheet]
+    } catch {
+      adoptedSheet = null
+    }
+  }
+  let styleAlive = () => doc.contains(style) && style.sheet !== null && style.sheet.cssRules.length > 0
+  let ensureStyleAlive = () => {
+    if (styleAlive()) return
+    const fresh = text(doc, 'style', '', STYLE_TEXT)
+    if (doc.contains(style)) style.replaceWith(fresh)
+    else container.prepend(fresh)
+    style = fresh
+  }
   // Details and collapsed-rail summaries open in a viewport-level panel.
   const pop = doc.createElement('div')
   pop.className = 'dqw-pop'
@@ -620,6 +648,7 @@ export function mountQuotaCard({
   }
 
   const renderAll = () => {
+    ensureStyleAlive()
     const providers = snapshot?.providers ?? []
     const glm = providers.find((provider) => provider?.key === 'glm')
     const copilot = providers.find((provider) => provider?.key === 'copilot')
@@ -806,6 +835,9 @@ export function mountQuotaCard({
     pop.removeEventListener('click', onPopClick)
     container.remove()
     pop.remove()
+    if (adoptedSheet !== null && Array.isArray(doc.adoptedStyleSheets)) {
+      doc.adoptedStyleSheets = doc.adoptedStyleSheets.filter((sheet) => sheet !== adoptedSheet)
+    }
   }
 }
 

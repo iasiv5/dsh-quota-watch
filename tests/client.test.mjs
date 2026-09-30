@@ -570,3 +570,25 @@ test('hidden pages pause the client poll timer and visibility resumes it', async
   dispose()
   window.close()
 })
+
+test('card restyles itself when an external actor strips the style tag', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  const styleBefore = container.querySelector('style')
+  assert.ok(styleBefore, 'style tag ships with the card')
+  // Simulate the observed external killer: rip the style tag out of the card.
+  styleBefore.remove()
+  assert.equal(container.querySelector('style'), null)
+  // The next render pass (poll or interaction) must notice and re-create it.
+  const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+  glmRow.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  const styleAfter = container.querySelector('style')
+  assert.ok(styleAfter, 'style tag is re-created on the next render pass')
+  assert.notEqual(styleAfter, styleBefore)
+  assert.match(styleAfter.textContent, /\.dqw-row-summary/)
+  assert.ok(styleAfter.sheet && styleAfter.sheet.cssRules.length > 0, 're-created tag parses into a live sheet')
+  dispose()
+  window.close()
+})
