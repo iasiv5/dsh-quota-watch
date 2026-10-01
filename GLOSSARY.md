@@ -1,6 +1,6 @@
 # DSH Quota Watch
 
-This context names the provider-reported plan allowances monitored for a personal DSH setup, keeping those facts distinct from token usage observed in DSH sessions.
+This context names the provider-reported plan allowances monitored for a personal DSH setup, keeping those facts distinct from token usage observed in DSH sessions. It also names the UI surfaces through which those observations are presented.
 
 ## Language
 
@@ -30,3 +30,21 @@ _Avoid_: Presenting an inverted value as provider-reported used; deriving used f
 
 **Provider usage statistic**: Token totals and call counts that a provider's monitor API reports for a stated query interval, such as the host-local calendar day ("today"). It is a consumption measure over an interval, distinct from quota windows and from anything inferred from DSH session events.
 _Avoid_: Calling it a quota; session usage; treating the interval as a rolling window unless it is one
+
+### UI surfaces
+
+**Floating ball (ball)**:
+The persistent, draggable circular entry point that renders each provider's used percentage as segmented arcs. It mounts at the top level of the page and never inside host-managed containers.
+_Avoid_: floating window, FAB, widget
+
+**Capsule**:
+The ball's collapsed one-line mode showing a compact per-provider summary. It shares the ball's position memory and context menu.
+_Avoid_: pill, mini mode
+
+**Panel**:
+The floating detail surface opened from the ball, the capsule, or a card row; it renders the quota overview and per-provider detail views.
+_Avoid_: popup, pop (implementation class name only), modal
+
+**Sidebar card (card)**:
+The opportunistic entry rendered in the DSH web sidebar footer when that mount point exists; it is silently absent when the point does not (collapsed sidebar, desktop profile).
+_Avoid_: rail trigger (retired), sidebar widget
