@@ -2,21 +2,21 @@
 
 [English summary](#english-summary)
 
-个人版 DSH Web 侧栏配额监控插件，集中显示 GLM Coding Plan 窗口与 GitHub Copilot 的 GitHub 返回额度快照。它不统计 DSH 会话 token、不保存历史，也不需要在浏览器输入任何 provider 密钥。
+个人版 DSH 额度监控插件，以常驻悬浮球集中显示 GLM Coding Plan 窗口与 GitHub Copilot 的 provider 上报额度快照。它不统计 DSH 会话 token、不保存历史，也不需要在浏览器输入任何 provider 密钥。
 
 ## 功能
 
-- 在侧栏底部区块的最顶部（框架渲染的插件入口与设置行之上）显示一张常显摘要卡（无标题、无刷新按钮）：GLM 与 GitHub Copilot 各占一行，统一显示**已用百分比**（Copilot 为 `100 − percent_remaining` 的单值反转），已用超过 80% 进度条转橙、超过 95% 转红；点击行首的 GLM / Copilot 名称立即触发一次宿主探测（等同原刷新按钮），点击行其余区域展开详情。侧栏收起时改为 36×36px 无框按钮与 16px 配额仪表盘图标，和设置按钮对齐；颜色使用 DSH 主题语义变量，自动适配浅色/深色皮肤。点击图标打开 GLM / Copilot 概览，可继续查看额度详情；不显示常驻提醒点。
-- GLM 摘要行固定显示 5 小时窗口已用百分比，行尾等宽小字为当日 token 用量；点击行在侧栏右侧弹出详情面板（半透明毛玻璃底，深浅主题均可读，不改变卡片高度）：今日 Tokens / 调用次数双大数字、窗口区为五列对齐网格（名称 ｜ `·` ｜ `已用`/♾️ ｜ 百分比 ｜ 同字号弱色「（重置: …）」，♾️ 与 `已用` 同列左对齐，弱色括注整列左对齐）、虚线分隔的分模型用量行（名称左对齐、token 数右对齐）。窗口按 MCP（月）→ 5 小时 → 每月 → 每周固定排序；接口未下发周窗口时显示「每周额度 · ♾️（无限）」占位，真实周窗口数据一旦下发即自动替换占位。同一时间至多展开一个详情；点击面板外或按 Esc 关闭。
-- GitHub Copilot 摘要行仅在 GitHub 返回有限、有效的 `remaining` 且带 `percent_remaining` 时显示；行尾等宽小字显示本期 credits 消耗的紧凑值。点击在侧栏右侧弹出精简详情（标签左对齐、数值右对齐的三行）：可用额度、本期已用（credits 消耗 + 弱化的已用百分比）、重置时间。`credits_used` 绝不用于推算余额，缺失有效百分比时该行不渲染。
-- 卡片顶部不显示全局更新时间；仅在等待首个快照或刷新失败时显示一行状态文字（读取中 / 刷新失败 / 查询失败）。
-- 今日 tokens / 调用次数按宿主本地时区的自然日（`00:00:00 → 当前时刻`）查询；不带滚动窗口语义。
-- 凭据缺失的 provider 不渲染摘要行（两者皆缺时整卡隐藏）；探测失败时保留最后一次成功数据并在行上加 ⚠ 过期标记。
-- 宿主默认每 60 秒探测（窗口 + 用量 + Copilot）；profile patch 可将 `pollIntervalSec` 设置在 30–3600 秒。浏览器页签可见时每 30 秒刷新视图，隐藏时暂停；点击行首 provider 名称可立即请求宿主探测。
+- **悬浮球**：常驻屏幕右下角（距边 16px 起步），可整体拖拽到任意位置，位置跨重启记忆，越界自动钳回视口。球面为分段进度环——GLM 占上半环、Copilot 占下半环，已用超过 80% 转橙、超过 95% 转红，任一 provider 超 95% 时整球轻微脉动（尊重系统「减少动态效果」设置，开启时不脉动）；环心保留配额仪表盘图标，颜色使用 DSH 主题语义变量，自动适配浅色 / 深色主题。悬停提示与 aria-label 实时给出「GLM x% · Copilot y%」摘要。
+- **胶囊**：右键悬浮球可切换为一行式胶囊（`GLM 13% · Copilot 24%`），阈值变色规则相同；右键胶囊切回悬浮球。球 / 胶囊形态跨重启记忆。
+- **面板**：点击球或胶囊展开浮动详情面板（半透明毛玻璃底，宽 `min(320px, 100vw−24px)`，靠边自动翻侧，滚动 / 缩放跟随），头部带标题与 ✕，Esc 或点击面板外关闭。概览列两个 provider 行，点击进入详情：GLM 为今日 Tokens / 调用次数双大数字 + 五列对齐窗口网格（MCP（月）→ 5 小时 → 每月 → 每周固定排序，周窗口未下发时显示「每周额度 · ♾️（无限）」占位）+ 分模型用量行；Copilot 为可用额度、本期已用（credits 消耗 + 弱化百分比）、重置时间三行。接口未下发有效 `remaining` / `percent_remaining` 时该行不渲染，`credits_used` 绝不用于推算余额。
+- **侧边栏卡片（渐进增强）**：Web profile 侧栏底部区块存在时，卡片照常显示（摘要行 + 行点击开面板 + 行首 provider 名称点击立即探测），卡片右上角有一个悬浮球切换按钮（悬停显形），可在卡片上隐藏 / 唤回悬浮球；侧栏收起（Web 窄栏）或侧栏整体不存在（Desktop 收起态）时卡片自然缺席、无报错，由悬浮球承载入口。
+- **右键菜单**：切为胶囊 / 切为悬浮球 · 显示 / 隐藏侧边栏卡片 · 立即刷新 · 隐藏悬浮球。菜单项随上下文增减（无侧栏卡片挂载点时不显示卡片项）。「隐藏悬浮球」为**会话级**——刷新页面即恢复，卡片上的切换按钮可在会话内直接唤回，任何时刻都至少有一条找回路径。
+- 凭据缺失的 provider 不渲染摘要行、环弧塌缩为零（两者皆缺时悬浮球与卡片一并隐藏）；探测失败时保留最后一次成功数据并在行上加 ⚠ 过期标记（⚠ 只出现在面板与卡片行内，不上球）。
+- 宿主默认每 60 秒探测（窗口 + 用量 + Copilot）；profile patch 可将 `pollIntervalSec` 设置在 30–3600 秒。浏览器页签可见时每 30 秒刷新视图，隐藏时暂停。
 
 ## 兼容与配置
 
-- 要求 DSH `0.1.7-rc.2` 或更高。
+- 要求 DSH `0.1.7-rc.2` 或更高；适配 `web` 与 `desktop` 两种 profile——Desktop 收起侧栏（整体消失）时由悬浮球承载入口，卡片为 Web 渐进增强。
 - GLM 从 `llm-pi-ai` profile 中配置的 provider `apiKeyEnv` credential reference 解析当前 key。支持 `zai-coding-cn`（国内）与 `zai` / `zai-coding`（国际）路由。每次探测都重新解析引用，用户轮换凭据后下一轮读取新值。
 - Copilot 使用内置 `llm-pi-ai/github-copilot` OAuth grant 的 `payload.refresh` 访问用户配额快照；不使用给模型请求的短期 `payload.access`，不使用 `COPILOT_GITHUB_TOKEN` 环境引用。每轮重新读取 grant，以支持用户重新授权或轮换。
 - 如需修改宿主周期，在 profile 的 `quota-watch` row 配置 `pollIntervalSec`；禁用插件请使用 DSH 插件管理器。
@@ -48,4 +48,4 @@ dsh plugin --profile web add @iasiv5/dsh-quota-watch
 
 ## English summary
 
-DSH Quota Watch is a personal DSH Web sidebar card for GLM Coding Plan windows and GitHub Copilot's provider-reported quota snapshot. It resolves credentials on every host-side probe, sends only normalized values to the browser, keeps no usage history, and never infers a Copilot balance from credits used. When the sidebar is collapsed, a 36px control with a 16px quota-gauge icon replaces the text card; clicking it opens provider summaries and details. The icon uses DSH semantic theme tokens and has no permanent border or alert badge. The Copilot endpoint is undocumented and may change; invalid or unlimited quota snapshots are shown as unavailable rather than guessed.
+DSH Quota Watch is a personal DSH quota monitor built around a persistent floating ball: a segmented dual-arc ring (GLM top half, Copilot bottom half) that turns amber past 80% and red past 95%, draggable anywhere with position remembered across restarts. Right-click toggles a compact capsule showing `GLM x% · Copilot y%`; clicking the ball or capsule opens a floating glass panel with provider summaries and details, closable via ✕, Esc or an outside click. A sidebar card remains an opportunistic extra entry on web profiles (with a corner button to hide or restore the ball) and silently disappears whenever the sidebar does — collapsed web sidebars and the desktop profile are covered by the floating ball alone. A right-click menu offers mode switch, card visibility, an immediate provider re-probe and a session-scoped ball hide. Credentials are resolved on every host-side probe, only normalized values reach the browser, no usage history is kept, and a Copilot balance is never inferred from credits used. Colors ride DSH semantic theme tokens with hardcoded fallbacks; all UI lives inside a shadow root (ADR 0001).
