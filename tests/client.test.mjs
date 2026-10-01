@@ -90,16 +90,16 @@ test('summary rows replace the expanded card and keep refresh and self-healing',
   assert.equal(footArea.firstElementChild, container, 'card claims the top of the sidebar footer')
   assert.deepEqual(requests[0], { path: 'api/dsh-quota-watch/overview', method: 'GET' })
 
-  assert.equal(container.querySelector('[data-action="collapse"]'), null)
-  assert.equal(container.querySelector('.dqw-head'), null, 'header with title and refresh button is removed')
+  assert.equal(container.shadowRoot.querySelector('[data-action="collapse"]'), null)
+  assert.equal(container.shadowRoot.querySelector('.dqw-head'), null, 'header with title and refresh button is removed')
 
-  const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+  const glmRow = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
   assert.ok(glmRow)
   assert.match(glmRow.textContent, /GLM/)
   assert.match(glmRow.textContent, /13%/)
   assert.match(glmRow.textContent, /8\.3M/)
   assert.match(glmRow.textContent, /▸/)
-  const copilotRow = container.querySelector('[data-dsh-quota-watch-row="copilot"]')
+  const copilotRow = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]')
   assert.ok(copilotRow)
   assert.match(copilotRow.textContent, /Copilot/)
   assert.match(copilotRow.textContent, /24%/)
@@ -107,7 +107,7 @@ test('summary rows replace the expanded card and keep refresh and self-healing',
   assert.ok(copilotExtra, 'copilot row shows compact credits used after the percent')
   assert.match(copilotExtra.textContent, /2\.4K/)
 
-  const updatedLine = container.querySelector('[data-role="updated"]')
+  const updatedLine = container.shadowRoot.querySelector('[data-role="updated"]')
   assert.ok(updatedLine)
   assert.equal(updatedLine.hidden, true, 'outer updated line hides once data renders')
   const pop = window.document.querySelector('[data-dsh-quota-watch-pop]')
@@ -130,7 +130,7 @@ test('collapsed rail matches the settings control and opens quota summaries', as
   const window = dom({ locale: 'zh-CN', collapsed: true })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const trigger = container.querySelector('.dqw-rail-trigger')
+  const trigger = container.shadowRoot.querySelector('.dqw-rail-trigger')
   const settingsIcon = window.document.querySelector('.settings-trigger svg')
   assert.ok(trigger)
   assert.equal(trigger.getAttribute('aria-label'), 'Token额度')
@@ -144,7 +144,7 @@ test('collapsed rail matches the settings control and opens quota summaries', as
   assert.equal(railIcon.querySelectorAll('circle').length, 2)
   assert.match(railIcon.querySelector('circle').getAttribute('r'), /^10$/)
   assert.match(railIcon.querySelector('path').getAttribute('d'), /M12 2\.4/)
-  const styles = container.querySelector('style').textContent
+  const styles = container.shadowRoot.querySelector('style').textContent
   assert.ok(styles.includes('[data-sidebar-collapsed] [data-dsh-quota-watch-card]'))
   assert.ok(styles.includes('width: 36px'))
   assert.ok(styles.includes('width: 16px'))
@@ -198,7 +198,7 @@ test('changing the sidebar mode closes a rail-anchored popover', async () => {
   const window = dom({ collapsed: true })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const frame = window.document.querySelector('.frame')
-  const trigger = window.document.querySelector('.dqw-rail-trigger')
+  const trigger = window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('.dqw-rail-trigger')
   const pop = window.document.querySelector('[data-dsh-quota-watch-pop]')
   trigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
@@ -217,7 +217,7 @@ test('provider-derived text is written via textContent, never markup', async () 
   hostile.plan.planName = '<img src=x onerror=alert(1)>'
   const { dispose } = await mounted(window, snapshot([hostile, copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  assert.equal(container.querySelector('img'), null)
+  assert.equal(container.shadowRoot.querySelector('img'), null)
   dispose()
   window.close()
 })
@@ -232,7 +232,7 @@ test('rows hide per provider state and the card hides when nothing is visible', 
       ],
       check(container) {
         assert.equal(container.hidden, true)
-        assert.equal(container.querySelector('[data-dsh-quota-watch-row]'), null)
+        assert.equal(container.shadowRoot.querySelector('[data-dsh-quota-watch-row]'), null)
       },
     },
     {
@@ -240,8 +240,8 @@ test('rows hide per provider state and the card hides when nothing is visible', 
       providers: [glmProvider(), { key: 'copilot', status: 'missing', credential: 'none', displayName: 'GitHub Copilot' }],
       check(container) {
         assert.equal(container.hidden, false)
-        assert.ok(container.querySelector('[data-dsh-quota-watch-row="glm"]'))
-        assert.equal(container.querySelector('[data-dsh-quota-watch-row="copilot"]'), null)
+        assert.ok(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]'))
+        assert.equal(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]'), null)
       },
     },
     {
@@ -250,19 +250,19 @@ test('rows hide per provider state and the card hides when nothing is visible', 
         quota: { balanceAvailable: true, remaining: 7600, entitlement: 10000 },
       })],
       check(container) {
-        assert.equal(container.querySelector('[data-dsh-quota-watch-row="copilot"]'), null)
+        assert.equal(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]'), null)
       },
     },
     {
       name: 'glm failure without data renders a non-interactive error row',
       providers: [glmProvider({ status: 'error', error: 'HTTP 503', plan: undefined, usage: undefined }), copilotProvider()],
       check(container) {
-        const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+        const glmRow = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
         assert.ok(glmRow)
         assert.match(glmRow.textContent, /Query failed/)
         assert.equal(glmRow.querySelector('.dqw-bar'), null)
         assert.equal(glmRow.getAttribute('aria-expanded'), null)
-        assert.ok(container.querySelector('[data-dsh-quota-watch-row="copilot"]'))
+        assert.ok(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]'))
       },
     },
   ]
@@ -289,7 +289,7 @@ test('summary bars switch color classes past usage thresholds', async () => {
     const provider = glmProvider()
     provider.plan.windows = [{ key: '5h', percent: item.percent }]
     const { dispose } = await mounted(window, snapshot([provider]))
-    const fill = window.document.querySelector('[data-dsh-quota-watch-row="glm"] .dqw-bar-fill')
+    const fill = window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"] .dqw-bar-fill')
     assert.ok(fill, `fill for ${item.percent}`)
     if (item.cls === null) {
       assert.equal(fill.classList.contains('warn'), false)
@@ -307,7 +307,7 @@ test('stale rows keep last-good values with a warning marker', async () => {
   const stale = glmProvider({ status: 'stale', error: 'HTTP 503' })
   stale.usage = { ...stale.usage, status: 'stale' }
   const { dispose } = await mounted(window, snapshot([stale, copilotProvider()]))
-  const glmRow = window.document.querySelector('[data-dsh-quota-watch-row="glm"]')
+  const glmRow = window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
   assert.match(glmRow.textContent, /⚠/)
   assert.equal(glmRow.querySelector('[data-dsh-quota-watch-stale]').title, 'HTTP 503')
   assert.match(glmRow.textContent, /13%/)
@@ -319,13 +319,13 @@ test('stale rows keep last-good values with a warning marker', async () => {
 test('token extras follow the interface locale with compact notation', async () => {
   const english = dom()
   const { dispose: disposeEnglish } = await mounted(english, snapshot([glmProvider()]))
-  assert.match(english.document.querySelector('[data-dsh-quota-watch-row="glm"]').textContent, /8\.3M/)
+  assert.match(english.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').textContent, /8\.3M/)
   disposeEnglish()
   english.close()
 
   const chinese = dom({ locale: 'zh-CN' })
   const { dispose: disposeChinese } = await mounted(chinese, snapshot([glmProvider()]))
-  assert.match(chinese.document.querySelector('[data-dsh-quota-watch-row="glm"]').textContent, /830万/)
+  assert.match(chinese.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').textContent, /830万/)
   disposeChinese()
   chinese.close()
 })
@@ -335,13 +335,13 @@ test('clicking a row opens only that provider in the side popover and toggles cl
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
   const pop = () => window.document.querySelector('[data-dsh-quota-watch-pop]')
-  const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+  const glmRow = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
   assert.equal(glmRow.getAttribute('aria-expanded'), 'false')
 
   const click = (element) => element.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   click(glmRow)
   await turn()
-  const openedGlm = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+  const openedGlm = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
   assert.equal(openedGlm.getAttribute('aria-expanded'), 'true')
   assert.match(openedGlm.querySelector('.dqw-chev').textContent, /▾/)
   assert.equal(pop().hidden, false)
@@ -349,14 +349,14 @@ test('clicking a row opens only that provider in the side popover and toggles cl
   assert.ok(pop().children.length > 0)
   assert.ok(pop().style.left, 'popover is positioned next to the row')
 
-  click(container.querySelector('[data-dsh-quota-watch-row="copilot"]'))
+  click(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]'))
   await turn()
-  assert.equal(container.querySelector('[data-dsh-quota-watch-row="copilot"]').getAttribute('aria-expanded'), 'true')
+  assert.equal(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]').getAttribute('aria-expanded'), 'true')
   assert.equal(pop().dataset.dshQuotaWatchDetail, 'copilot')
   assert.ok(pop().children.length > 0)
-  assert.equal(container.querySelector('[data-dsh-quota-watch-row="glm"]').getAttribute('aria-expanded'), 'false')
+  assert.equal(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').getAttribute('aria-expanded'), 'false')
 
-  click(container.querySelector('[data-dsh-quota-watch-row="copilot"]'))
+  click(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]'))
   await turn()
   assert.equal(pop().hidden, true)
   assert.equal(pop().children.length, 0)
@@ -369,7 +369,7 @@ test('outside pointerdown and Escape close the detail popover', async () => {
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
   const pop = window.document.querySelector('[data-dsh-quota-watch-pop]')
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(pop.hidden, false)
 
@@ -377,7 +377,7 @@ test('outside pointerdown and Escape close the detail popover', async () => {
   await turn()
   assert.equal(pop.hidden, true)
 
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(pop.hidden, false)
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -391,13 +391,13 @@ test('clicking the provider label re-probes without toggling the row', async () 
   const window = dom()
   const { dispose, requests } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+  const glmRow = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
   const label = glmRow.querySelector('.dqw-label[data-action="refresh"]')
   assert.ok(label, 'provider label carries the refresh action')
   label.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.deepEqual(requests.at(-1), { path: 'api/dsh-quota-watch/refresh', method: 'POST' })
-  assert.equal(container.querySelector('[data-dsh-quota-watch-row="glm"]').getAttribute('aria-expanded'), 'false', 'label click does not expand the row')
+  assert.equal(container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').getAttribute('aria-expanded'), 'false', 'label click does not expand the row')
   assert.equal(window.document.querySelector('[data-dsh-quota-watch-pop]').hidden, true)
   dispose()
   window.close()
@@ -407,12 +407,12 @@ test('rows toggle with keyboard activation', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
+  const glmRow = container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
   assert.equal(glmRow.getAttribute('tabindex'), '0')
   glmRow.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
   await turn()
   assert.equal(window.document.querySelector('[data-dsh-quota-watch-pop]').hidden, false)
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: ' ', bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: ' ', bubbles: true }))
   await turn()
   assert.equal(window.document.querySelector('[data-dsh-quota-watch-pop]').hidden, true)
   dispose()
@@ -423,7 +423,7 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const detail = window.document.querySelector('[data-dsh-quota-watch-detail="glm"]')
   assert.match(detail.textContent, /8\.3M/)
@@ -467,7 +467,7 @@ test('Chinese reset and unlimited notes use spaced parentheses and padded dates'
   provider.plan.windows.find((item) => item.key === 'mcp').resetsAt = '2026-01-01T00:00:00.000Z'
   const { dispose } = await mounted(window, snapshot([provider]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const detail = window.document.querySelector('[data-dsh-quota-watch-detail="glm"]')
   const cells = [...detail.querySelector('.dqw-wins').children]
@@ -489,7 +489,7 @@ test('a reported weekly window renders real data in fixed order without the plac
   ]
   const { dispose } = await mounted(window, snapshot([provider]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const detail = window.document.querySelector('[data-dsh-quota-watch-detail="glm"]')
   const wins = detail.querySelector('.dqw-wins')
@@ -513,7 +513,7 @@ test('Copilot detail renders simplified balance, used and reset rows without a b
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  container.querySelector('[data-dsh-quota-watch-row="copilot"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="copilot"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const detail = window.document.querySelector('[data-dsh-quota-watch-detail="copilot"]')
   const kvRows = detail.querySelectorAll('.dqw-kv')
@@ -539,7 +539,7 @@ test('stale detail leads with the degradation banner', async () => {
   stale.usage = { ...stale.usage, status: 'stale' }
   const { dispose } = await mounted(window, snapshot([stale]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  container.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const detail = window.document.querySelector('[data-dsh-quota-watch-detail="glm"]')
   assert.match(detail.querySelector('.dqw-error').textContent, /Data may be stale: HTTP 503/)
@@ -571,24 +571,15 @@ test('hidden pages pause the client poll timer and visibility resumes it', async
   window.close()
 })
 
-test('card restyles itself when an external actor strips the style tag', async () => {
+test('card styles live inside the shadow root, not the document', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const styleBefore = container.querySelector('style')
-  assert.ok(styleBefore, 'style tag ships with the card')
-  // Simulate the observed external killer: rip the style tag out of the card.
-  styleBefore.remove()
-  assert.equal(container.querySelector('style'), null)
-  // The next render pass (poll or interaction) must notice and re-create it.
-  const glmRow = container.querySelector('[data-dsh-quota-watch-row="glm"]')
-  glmRow.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  const styleAfter = container.querySelector('style')
-  assert.ok(styleAfter, 'style tag is re-created on the next render pass')
-  assert.notEqual(styleAfter, styleBefore)
-  assert.match(styleAfter.textContent, /\.dqw-row-summary/)
-  assert.ok(styleAfter.sheet && styleAfter.sheet.cssRules.length > 0, 're-created tag parses into a live sheet')
+  const documentStyles = [...window.document.querySelectorAll('style')]
+  assert.equal(documentStyles.length, 0, 'no plugin style tag leaks into the document')
+  const shadowStyle = container.shadowRoot.querySelector('style')
+  assert.ok(shadowStyle, 'style ships inside the shadow root')
+  assert.match(shadowStyle.textContent, /\.dqw-row-summary/)
   dispose()
   window.close()
 })
