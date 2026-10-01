@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { mountQuotaCard } from '../src/client.mjs'
+import { FLOAT_GEOMETRY_KEY } from '../src/client/prefs.mjs'
 
 function response(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
@@ -450,6 +451,68 @@ test('without a sidebar footer the float ball is the only surface', async () => 
   ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  assert.equal(panel.hidden, false)
+  dispose()
+  window.close()
+})
+
+test('ball restores persisted geometry and clamps off-screen positions', async () => {
+  const seeded = dom()
+  seeded.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":120,"y":80}')
+  const seededMounted = await mounted(seeded, snapshot([glmProvider(), copilotProvider()]))
+  const seededHost = seeded.document.querySelector('[data-dsh-quota-watch-float]')
+  assert.equal(seededHost.style.left, '120px')
+  assert.equal(seededHost.style.top, '80px')
+  seededMounted.dispose()
+  seeded.close()
+
+  const window = dom()
+  window.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":-500,"y":99999}')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const left = parseFloat(host.style.left)
+  const top = parseFloat(host.style.top)
+  assert.ok(left >= 8 && left <= window.innerWidth - 8 - 38, `left clamped: ${left}`)
+  assert.ok(top >= 8 && top <= window.innerHeight - 8 - 38, `top clamped: ${top}`)
+  const saved = JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY))
+  assert.equal(saved.x, left)
+  assert.equal(saved.y, top)
+  dispose()
+  window.close()
+})
+
+test('ball drag persists clamped geometry and suppresses the trailing click', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const ball = floatBall(window)
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  ball.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+  window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 560, clientY: 520 }))
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 560, clientY: 520, button: 0 }))
+  await turn()
+  const saved = JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY))
+  assert.equal(saved.x, 560)
+  assert.equal(saved.y, 520)
+  assert.equal(host.style.left, '560px')
+  assert.equal(host.style.top, '520px')
+  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, true, 'drag suppresses the trailing click')
+  dispose()
+  window.close()
+})
+
+test('a press-release without movement keeps the click behavior', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const ball = floatBall(window)
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  ball.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
+  ball.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 12, clientY: 10, button: 0 }))
+  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
   assert.equal(panel.hidden, false)
   dispose()
   window.close()

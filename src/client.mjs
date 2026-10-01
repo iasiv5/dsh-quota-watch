@@ -1,6 +1,6 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { clampPoint } from './client/prefs.mjs'
+import { clampPoint, loadFloatGeometry, saveFloatGeometry } from './client/prefs.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -398,17 +398,73 @@ export function mountQuotaCard({
   const applyFloatGeometry = () => {
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
+    const saved = loadFloatGeometry(win.localStorage)
     const point = clampPoint(
-      { x: viewWidth - BALL_MARGIN - BALL_SIZE, y: viewHeight - BALL_MARGIN - BALL_SIZE },
+      saved ?? { x: viewWidth - BALL_MARGIN - BALL_SIZE, y: viewHeight - BALL_MARGIN - BALL_SIZE },
       { width: viewWidth, height: viewHeight },
       BALL_SIZE,
     )
     floatHost.style.left = `${Math.round(point.x)}px`
     floatHost.style.top = `${Math.round(point.y)}px`
+    // Persist the clamped coordinates so a saved off-screen position self-heals.
+    saveFloatGeometry(win.localStorage, point)
   }
   applyFloatGeometry()
   // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
   floatRoot.append(panel)
+
+  let suppressNextClick = false
+  /** Whole-surface drag: 6px threshold, top-left follows the pointer, clamp + persist on release.
+   * Move/up listen on `document` — pointer events always bubble there, in browsers and jsdom alike.
+   * Returns a dispose function. */
+  const attachDrag = (surfaceEl) => {
+    let dragging = false
+    let moved = false
+    let originX = 0
+    let originY = 0
+    const onPointerDown = (event) => {
+      if (event.button !== 0) return
+      dragging = true
+      moved = false
+      originX = event.clientX
+      originY = event.clientY
+      surfaceEl.setPointerCapture?.(event.pointerId)
+    }
+    const onPointerMove = (event) => {
+      if (!dragging) return
+      if (!moved && Math.hypot(event.clientX - originX, event.clientY - originY) < 6) return
+      moved = true
+      doc.body.style.userSelect = 'none'
+      floatHost.style.left = `${Math.round(event.clientX)}px`
+      floatHost.style.top = `${Math.round(event.clientY)}px`
+    }
+    const onPointerUp = (event) => {
+      if (!dragging) return
+      dragging = false
+      doc.body.style.userSelect = ''
+      if (!moved) return
+      const viewWidth = win.innerWidth ?? 1024
+      const viewHeight = win.innerHeight ?? 768
+      const point = clampPoint(
+        { x: event.clientX, y: event.clientY },
+        { width: viewWidth, height: viewHeight },
+        BALL_SIZE,
+      )
+      floatHost.style.left = `${Math.round(point.x)}px`
+      floatHost.style.top = `${Math.round(point.y)}px`
+      saveFloatGeometry(win.localStorage, point)
+      suppressNextClick = true
+    }
+    surfaceEl.addEventListener('pointerdown', onPointerDown)
+    doc.addEventListener('pointermove', onPointerMove)
+    doc.addEventListener('pointerup', onPointerUp)
+    return () => {
+      surfaceEl.removeEventListener('pointerdown', onPointerDown)
+      doc.removeEventListener('pointermove', onPointerMove)
+      doc.removeEventListener('pointerup', onPointerUp)
+    }
+  }
+  const disposeDrag = attachDrag(ball)
   let snapshot
   let requestSequence = 0
   let timer
@@ -747,6 +803,10 @@ export function mountQuotaCard({
   }
 
   const onBallClick = () => {
+    if (suppressNextClick) {
+      suppressNextClick = false
+      return
+    }
     if (openKey === 'overview' && !panel.hidden) {
       openKey = undefined
       syncPop()
@@ -926,6 +986,7 @@ export function mountQuotaCard({
     body.removeEventListener('keydown', onBodyKeydown)
     panel.removeEventListener('click', onPanelClick)
     ball.removeEventListener('click', onBallClick)
+    disposeDrag()
     container.remove()
     panel.remove()
     floatHost.remove()
