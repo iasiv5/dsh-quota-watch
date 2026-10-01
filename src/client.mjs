@@ -11,6 +11,7 @@ const COPY = {
   zh: {
     title: 'Token额度',
     openDetails: '查看详情',
+    close: '关闭',
     backToOverview: '返回额度概览',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
     refresh: '刷新',
@@ -38,6 +39,7 @@ const COPY = {
   en: {
     title: 'Quota Watch',
     openDetails: 'View details',
+    close: 'Close',
     backToOverview: 'Back to quota overview',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
     refresh: 'Refresh',
@@ -87,15 +89,17 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dqw-pop { position: fixed; z-index: 2147483000; min-width: 166px; max-width: 320px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-pop { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
-.dqw-pop[hidden] { display: none; }
-.dqw-pop *, .dqw-pop *::before, .dqw-pop *::after { box-sizing: border-box; }
-.dqw-pop-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dqw-pop-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; }
-.dqw-pop-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
-.dqw-pop-back svg { display: block; width: 16px; height: 16px; }
-.dqw-pop-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-panel { position: fixed; z-index: 2147483000; width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
+.dqw-panel[hidden] { display: none; }
+.dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
+.dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dqw-panel-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; flex: 1; min-width: 0; }
+.dqw-panel-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
+.dqw-panel-back svg { display: block; width: 16px; height: 16px; }
+.dqw-panel-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-panel-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+.dqw-panel-close:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
 .dqw-overview-row { display: flex; align-items: center; width: 100%; gap: 6px; margin: 0; padding: 5px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .dqw-overview-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
@@ -312,20 +316,20 @@ export function mountQuotaCard({
   body.append(lastUpdated)
   card.append(body)
   cardRoot.append(style, card)
-  // Details and collapsed-rail summaries open in a viewport-level panel.
-  const pop = doc.createElement('div')
-  pop.className = 'dqw-pop'
-  pop.id = 'dqw-quota-watch-pop'
-  pop.setAttribute('role', 'dialog')
-  pop.dataset.dshQuotaWatchPop = ''
-  pop.hidden = true
-  doc.body.append(pop)
+  // Details open in a viewport-level floating panel — the only detail surface.
+  const panel = doc.createElement('div')
+  panel.className = 'dqw-panel'
+  panel.setAttribute('role', 'dialog')
+  panel.dataset.dshQuotaWatchPanel = ''
+  panel.hidden = true
+  doc.body.append(panel)
   let snapshot
   let requestSequence = 0
   let timer
   let disposed = false
   let queuedPlace = false
   let openKey
+  let panelNav = false
 
   const fillClass = (percent) => (percent > 95 ? 'dqw-bar-fill danger' : percent > 80 ? 'dqw-bar-fill warn' : 'dqw-bar-fill')
 
@@ -389,7 +393,7 @@ export function mountQuotaCard({
     const row = doc.createElement('button')
     row.type = 'button'
     row.className = 'dqw-overview-row'
-    row.dataset.dshQuotaWatchPopProvider = key
+    row.dataset.dshQuotaWatchPanelProvider = key
     row.setAttribute('aria-expanded', 'false')
     row.setAttribute('aria-label', `${model.label} · ${typeof model.percent === 'number' ? formatPercent(model.percent, locale) : '—'} · ${copy.openDetails}`)
     row.append(label)
@@ -416,8 +420,34 @@ export function mountQuotaCard({
     return row
   }
 
+  /** Panel chrome: optional back, title, always a close affordance. */
+  const panelHeader = ({ title, showBack = false }) => {
+    const header = doc.createElement('div')
+    header.className = 'dqw-panel-header'
+    if (showBack) {
+      const back = doc.createElement('button')
+      back.type = 'button'
+      back.className = 'dqw-panel-back'
+      back.dataset.action = 'back-to-overview'
+      back.setAttribute('aria-label', copy.backToOverview)
+      back.title = copy.backToOverview
+      back.append(backIcon(doc))
+      header.append(back)
+    }
+    header.append(text(doc, 'p', 'dqw-panel-title', title))
+    const close = doc.createElement('button')
+    close.type = 'button'
+    close.className = 'dqw-panel-close'
+    close.dataset.action = 'panel-close'
+    close.setAttribute('aria-label', copy.close)
+    close.title = copy.close
+    close.append(text(doc, 'span', '', '✕'))
+    header.append(close)
+    return header
+  }
+
   const renderOverview = () => {
-    pop.replaceChildren(text(doc, 'p', 'dqw-pop-title', copy.title))
+    panel.replaceChildren(panelHeader({ title: copy.title }))
     const providers = snapshot?.providers ?? []
     const glm = providers.find((provider) => provider?.key === 'glm')
     const copilot = providers.find((provider) => provider?.key === 'copilot')
@@ -426,30 +456,18 @@ export function mountQuotaCard({
       renderOverviewProvider('copilot', copilotRowModel(copilot)),
     ].filter(Boolean)
     if (rows.length === 0) {
-      pop.append(text(doc, 'p', 'dqw-muted', lastUpdated.textContent || copy.loading))
+      panel.append(text(doc, 'p', 'dqw-muted', lastUpdated.textContent || copy.loading))
       return
     }
     const list = doc.createElement('div')
     list.className = 'dqw-overview-list'
     list.append(...rows)
-    pop.append(list)
+    panel.append(list)
   }
 
-  function renderDetail(detail, key, provider, fromRail = false) {
+  function renderDetail(detail, key, provider, fromPanelNav = false) {
     detail.replaceChildren()
-    if (fromRail) {
-      const header = doc.createElement('div')
-      header.className = 'dqw-pop-header'
-      const back = doc.createElement('button')
-      back.type = 'button'
-      back.className = 'dqw-pop-back'
-      back.dataset.action = 'back-to-overview'
-      back.setAttribute('aria-label', copy.backToOverview)
-      back.title = copy.backToOverview
-      back.append(backIcon(doc))
-      header.append(back, text(doc, 'p', 'dqw-pop-title', copy.providerNames[key]))
-      detail.append(header)
-    }
+    detail.append(panelHeader({ title: copy.providerNames[key], showBack: fromPanelNav }))
     if (provider?.status === 'stale') {
       detail.append(text(doc, 'p', 'dqw-error', `${copy.stale}${provider.error ? `: ${provider.error}` : ''}`))
     }
@@ -550,55 +568,56 @@ export function mountQuotaCard({
     }
   }
 
-  /** Anchor the popover to the expanded provider row. */
-  const positionPop = () => {
-    if (pop.hidden || openKey === undefined) return
-    const anchor = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
-    if (!anchor) return
-    const rect = anchor.getBoundingClientRect()
+  /** Anchor the panel beside its opener (a card row today, the float surface later). */
+  let lastAnchor = null
+  const placePanel = () => {
+    if (panel.hidden || !lastAnchor) return
+    const rect = lastAnchor.getBoundingClientRect()
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
-    const width = pop.offsetWidth || 240
-    const height = pop.offsetHeight || 160
+    const width = panel.offsetWidth || 240
+    const height = panel.offsetHeight || 160
     let left = rect.right + 8
     if (left + width > viewWidth - 8) left = rect.left - width - 8
     if (left + width > viewWidth - 8) left = viewWidth - width - 8
     left = Math.max(8, left)
     const top = Math.min(Math.max(rect.top, 8), Math.max(8, viewHeight - height - 8))
-    pop.style.left = `${Math.round(left)}px`
-    pop.style.top = `${Math.round(top)}px`
+    panel.style.left = `${Math.round(left)}px`
+    panel.style.top = `${Math.round(top)}px`
   }
 
   const syncPop = () => {
     if (openKey === undefined || disposed) {
-      pop.hidden = true
-      pop.replaceChildren()
-      delete pop.dataset.dshQuotaWatchDetail
-      delete pop.dataset.dshQuotaWatchOverview
+      panel.hidden = true
+      panel.replaceChildren()
+      delete panel.dataset.dshQuotaWatchPanelDetail
+      delete panel.dataset.dshQuotaWatchPanelOverview
+      lastAnchor = null
+      panelNav = false
       return
     }
     if (openKey === 'overview') {
       renderOverview()
-      delete pop.dataset.dshQuotaWatchDetail
-      pop.dataset.dshQuotaWatchOverview = ''
-      pop.setAttribute('aria-label', copy.title)
-      pop.hidden = false
-      positionPop()
+      delete panel.dataset.dshQuotaWatchPanelDetail
+      panel.dataset.dshQuotaWatchPanelOverview = ''
+      panel.setAttribute('aria-label', copy.title)
+      panel.hidden = false
+      placePanel()
       return
     }
     const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
     const row = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
-    if (!provider || !row || !row.hasAttribute('data-expandable')) {
+    if (!provider || (!panelNav && (!row || !row.hasAttribute('data-expandable')))) {
       openKey = undefined
       syncPop()
       return
     }
-    renderDetail(pop, openKey, provider, false)
-    pop.dataset.dshQuotaWatchDetail = openKey
-    delete pop.dataset.dshQuotaWatchOverview
-    pop.setAttribute('aria-label', copy.providerNames[openKey])
-    pop.hidden = false
-    positionPop()
+    renderDetail(panel, openKey, provider, panelNav)
+    panel.dataset.dshQuotaWatchPanelDetail = openKey
+    delete panel.dataset.dshQuotaWatchPanelOverview
+    panel.setAttribute('aria-label', panelNav ? `${copy.providerNames[openKey]} · ${copy.title}` : copy.providerNames[openKey])
+    panel.hidden = false
+    placePanel()
   }
 
   const renderAll = () => {
@@ -683,19 +702,33 @@ export function mountQuotaCard({
     if (doc.visibilityState === 'hidden') stopPolling()
     else startPolling()
   }
-  const toggleRow = (key) => {
+  const toggleRow = (key, anchorEl) => {
+    panelNav = false
+    lastAnchor = anchorEl ?? null
     openKey = openKey === key ? undefined : key
     renderAll()
   }
-  const onPopClick = (event) => {
+  const openOverview = (anchorEl) => {
+    panelNav = false
+    lastAnchor = anchorEl ?? null
+    openKey = 'overview'
+    syncPop()
+  }
+  const onPanelClick = (event) => {
+    if (event.target?.closest?.('[data-action="panel-close"]')) {
+      openKey = undefined
+      syncPop()
+      return
+    }
     if (event.target?.closest?.('[data-action="back-to-overview"]')) {
       openKey = 'overview'
       syncPop()
       return
     }
-    const provider = event.target?.closest?.('[data-dsh-quota-watch-pop-provider]')
+    const provider = event.target?.closest?.('[data-dsh-quota-watch-panel-provider]')
     if (provider) {
-      openKey = provider.dataset.dshQuotaWatchPopProvider
+      openKey = provider.dataset.dshQuotaWatchPanelProvider
+      panelNav = true
       syncPop()
     }
   }
@@ -705,7 +738,7 @@ export function mountQuotaCard({
       return
     }
     const row = event.target?.closest?.('[data-dsh-quota-watch-row][data-expandable]')
-    if (row) toggleRow(row.dataset.dshQuotaWatchRow)
+    if (row) toggleRow(row.dataset.dshQuotaWatchRow, row)
   }
   const onBodyKeydown = (event) => {
     if (event.key !== 'Enter' && event.key !== ' ') return
@@ -717,13 +750,16 @@ export function mountQuotaCard({
   }
   const onDocPointerDown = (event) => {
     if (openKey === undefined) return
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : []
+    if (path.includes(panel) || path.includes(container)) return
     const target = event.target
-    if (pop.contains(target) || target?.closest?.('[data-dsh-quota-watch-row]') || target?.closest?.(CARD_SELECTOR)) return
+    if (target === panel || target === container) return
+    if (target?.getRootNode?.() === cardRoot) return
     openKey = undefined
     renderAll()
   }
-  const onDocScroll = () => { positionPop() }
-  const onWinResize = () => { positionPop() }
+  const onDocScroll = () => { placePanel() }
+  const onWinResize = () => { placePanel() }
   const onDocKeydown = (event) => {
     if (event.key === 'Escape' && openKey !== undefined) {
       openKey = undefined
@@ -732,7 +768,7 @@ export function mountQuotaCard({
   }
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
-  pop.addEventListener('click', onPopClick)
+  panel.addEventListener('click', onPanelClick)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
   doc.addEventListener('scroll', onDocScroll, true)
@@ -751,9 +787,9 @@ export function mountQuotaCard({
     win.removeEventListener('resize', onWinResize)
     body.removeEventListener('click', onBodyClick)
     body.removeEventListener('keydown', onBodyKeydown)
-    pop.removeEventListener('click', onPopClick)
+    panel.removeEventListener('click', onPanelClick)
     container.remove()
-    pop.remove()
+    panel.remove()
   }
 }
 
