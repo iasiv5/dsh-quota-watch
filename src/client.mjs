@@ -1,6 +1,6 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { clampPoint, loadFloatGeometry, saveFloatGeometry } from './client/prefs.mjs'
+import { clampPoint, loadFloatGeometry, loadFloatMode, loadSurfaceFlags, saveFloatGeometry, saveFloatMode, saveSurfaceFlags } from './client/prefs.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -18,6 +18,15 @@ const COPY = {
     title: 'Token额度',
     openDetails: '查看详情',
     close: '关闭',
+    menu: {
+      toggleToBall: '切为悬浮球',
+      toggleToCapsule: '切为胶囊',
+      showCard: '显示侧边栏卡片',
+      hideCard: '隐藏侧边栏卡片',
+      refreshNow: '立即刷新',
+      hideBall: '隐藏悬浮球',
+      showBall: '显示悬浮球',
+    },
     backToOverview: '返回额度概览',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
     refresh: '刷新',
@@ -46,6 +55,15 @@ const COPY = {
     title: 'Quota Watch',
     openDetails: 'View details',
     close: 'Close',
+    menu: {
+      toggleToBall: 'Switch to ball',
+      toggleToCapsule: 'Switch to capsule',
+      showCard: 'Show sidebar card',
+      hideCard: 'Hide sidebar card',
+      refreshNow: 'Refresh now',
+      hideBall: 'Hide floating ball',
+      showBall: 'Show floating ball',
+    },
     backToOverview: 'Back to quota overview',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
     refresh: 'Refresh',
@@ -75,7 +93,7 @@ const COPY = {
 const STYLE_TEXT = `
 :host { box-sizing: border-box; width: 100%; margin: 0 0 8px; color: var(--dsw-alias-label-primary, inherit); font: inherit; }
 :host *, :host *::before, :host *::after { box-sizing: border-box; }
-.dqw-card { border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; }
+.dqw-card { position: relative; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; }
 .dqw-meta { margin: 0; font-size: 10px; line-height: 14px; opacity: .7; }
 .dqw-body { display: flex; flex-direction: column; }
 .dqw-row-summary { display: flex; align-items: center; gap: 6px; padding: 3px 6px; margin: 0 -2px; border-radius: 8px; }
@@ -95,6 +113,11 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dqw-ball-toggle { position: absolute; top: 2px; right: 2px; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; opacity: .4; }
+.dqw-card:hover .dqw-ball-toggle, .dqw-ball-toggle:focus-visible, .dqw-ball-toggle[data-ball-hidden="true"] { opacity: 1; }
+.dqw-ball-toggle[data-ball-hidden="true"] { color: var(--dsw-alias-button-primary-fill, #5b8def); }
+.dqw-ball-toggle:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
+.dqw-ball-toggle svg { display: block; width: 14px; height: 14px; }
 .dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
 .dqw-overview-row { display: flex; align-items: center; width: 100%; gap: 6px; margin: 0; padding: 5px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .dqw-overview-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
@@ -136,6 +159,17 @@ const FLOAT_STYLE_TEXT = `
 .dqw-ring-glm.warn, .dqw-ring-copilot.warn { stroke: var(--dsw-alias-label-warning, #d29922); }
 .dqw-ring-glm.danger, .dqw-ring-copilot.danger { stroke: var(--dsw-alias-label-danger, #c93c3c); }
 .dqw-ball > svg:not(.dqw-ring) { position: relative; width: 16px; height: 16px; }
+.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; }
+.dqw-capsule:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
+.dqw-capsule:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
+.dqw-capsule-sep { opacity: .5; }
+.dqw-capsule-glm, .dqw-capsule-copilot { font-variant-numeric: tabular-nums; font-weight: 600; }
+.dqw-capsule-glm.warn, .dqw-capsule-copilot.warn { color: var(--dsw-alias-label-warning, #d29922); }
+.dqw-capsule-glm.danger, .dqw-capsule-copilot.danger { color: var(--dsw-alias-label-danger, #c93c3c); }
+.dqw-menu { position: fixed; min-width: 150px; padding: 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 88%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); font: inherit; display: flex; flex-direction: column; }
+.dqw-menu[hidden] { display: none; }
+.dqw-menu-item { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 16px; text-align: left; cursor: pointer; }
+.dqw-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
 @media (prefers-reduced-motion: no-preference) {
   .dqw-ball[data-alert] { animation: dqw-ball-pulse 1.6s ease-in-out infinite; }
 }
@@ -229,6 +263,17 @@ function quotaIcon(doc) {
   hub.setAttribute('stroke', 'none')
   svg.append(dial, ticks, needle, hub)
   return svg
+}
+
+/** One right-click menu row. */
+function menuItem(doc, action, label) {
+  const item = doc.createElement('button')
+  item.type = 'button'
+  item.className = 'dqw-menu-item'
+  item.setAttribute('role', 'menuitem')
+  item.dataset.menu = action
+  item.append(text(doc, 'span', '', label))
+  return item
 }
 
 /** Segmented quota ring: GLM owns the top half, Copilot the bottom half. */
@@ -372,7 +417,13 @@ export function mountQuotaCard({
   const lastUpdated = text(doc, 'p', 'dqw-meta', copy.loading)
   lastUpdated.dataset.role = 'updated'
   body.append(lastUpdated)
-  card.append(body)
+  const ballToggle = doc.createElement('button')
+  ballToggle.type = 'button'
+  ballToggle.className = 'dqw-ball-toggle'
+  ballToggle.dataset.action = 'toggle-ball'
+  ballToggle.append(quotaIcon(doc))
+  ballToggle.addEventListener('click', () => { setBallSessionHidden(!ballSessionHidden) })
+  card.append(body, ballToggle)
   cardRoot.append(style, card)
   // Details open in a viewport-level floating panel — the only detail surface.
   const panel = doc.createElement('div')
@@ -386,14 +437,43 @@ export function mountQuotaCard({
   floatHost.dataset.dshQuotaWatchFloat = ''
   const floatRoot = floatHost.attachShadow({ mode: 'open' })
   floatRoot.append(text(doc, 'style', '', FLOAT_STYLE_TEXT))
-  const ball = doc.createElement('button')
-  ball.type = 'button'
-  ball.className = 'dqw-ball'
-  ball.dataset.dshQuotaWatchBall = ''
-  ball.setAttribute('aria-haspopup', 'dialog')
-  ball.setAttribute('aria-expanded', 'false')
-  ball.append(ringSvg(doc), quotaIcon(doc))
-  floatRoot.append(ball)
+  const buildBall = () => {
+    const el = doc.createElement('button')
+    el.type = 'button'
+    el.className = 'dqw-ball'
+    el.dataset.dshQuotaWatchBall = ''
+    el.setAttribute('aria-haspopup', 'dialog')
+    el.setAttribute('aria-expanded', 'false')
+    el.append(ringSvg(doc), quotaIcon(doc))
+    return el
+  }
+  const buildCapsule = () => {
+    const el = doc.createElement('div')
+    el.className = 'dqw-capsule'
+    el.dataset.dshQuotaWatchCapsule = ''
+    el.setAttribute('role', 'button')
+    el.tabIndex = 0
+    el.setAttribute('aria-haspopup', 'dialog')
+    el.setAttribute('aria-expanded', 'false')
+    el.append(
+      text(doc, 'span', 'dqw-capsule-glm', ''),
+      text(doc, 'span', 'dqw-capsule-sep', '·'),
+      text(doc, 'span', 'dqw-capsule-copilot', ''),
+    )
+    return el
+  }
+  // One surface at a time: ball (default) or capsule (persisted mode).
+  let surface = loadFloatMode(win.localStorage) === 'capsule' ? buildCapsule() : buildBall()
+  floatRoot.append(surface)
+  /** Session hide only hides the surface; the host stays alive for the panel. */
+  const syncFloatVisibility = () => {
+    surface.hidden = ballSessionHidden || dataHidden
+    floatHost.hidden = dataHidden
+    ballToggle.setAttribute('data-ball-hidden', String(ballSessionHidden))
+    const toggleLabel = ballSessionHidden ? copy.menu.showBall : copy.menu.hideBall
+    ballToggle.setAttribute('aria-label', toggleLabel)
+    ballToggle.title = toggleLabel
+  }
   doc.documentElement.append(floatHost)
   const applyFloatGeometry = () => {
     const viewWidth = win.innerWidth ?? 1024
@@ -412,6 +492,12 @@ export function mountQuotaCard({
   applyFloatGeometry()
   // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
   floatRoot.append(panel)
+  const menu = doc.createElement('div')
+  menu.className = 'dqw-menu'
+  menu.dataset.dshQuotaWatchMenu = ''
+  menu.setAttribute('role', 'menu')
+  menu.hidden = true
+  floatRoot.append(menu)
 
   let suppressNextClick = false
   /** Whole-surface drag: 6px threshold, top-left follows the pointer, clamp + persist on release.
@@ -464,7 +550,6 @@ export function mountQuotaCard({
       doc.removeEventListener('pointerup', onPointerUp)
     }
   }
-  const disposeDrag = attachDrag(ball)
   let snapshot
   let requestSequence = 0
   let timer
@@ -472,6 +557,25 @@ export function mountQuotaCard({
   let queuedPlace = false
   let openKey
   let panelNav = false
+  let ballSessionHidden = false
+  let dataHidden = false
+  let surfaceFlags = loadSurfaceFlags(win.localStorage)
+  const setBallSessionHidden = (hidden) => {
+    const wasHidden = ballSessionHidden
+    ballSessionHidden = hidden
+    // Closing the panel is a one-time consequence of hiding, not a steady state:
+    // card rows must keep opening the panel while the ball stays hidden.
+    if (hidden && !wasHidden && openKey !== undefined) {
+      openKey = undefined
+      syncPop()
+    }
+    syncFloatVisibility()
+  }
+  const setCardHidden = (hidden) => {
+    surfaceFlags = { cardHidden: hidden }
+    saveSurfaceFlags(win.localStorage, surfaceFlags)
+    renderAll()
+  }
 
   const fillClass = (percent) => (percent > 95 ? 'dqw-bar-fill danger' : percent > 80 ? 'dqw-bar-fill warn' : 'dqw-bar-fill')
 
@@ -736,7 +840,7 @@ export function mountQuotaCard({
       delete panel.dataset.dshQuotaWatchPanelOverview
       lastAnchor = null
       panelNav = false
-      ball.setAttribute('aria-expanded', 'false')
+      surface.setAttribute('aria-expanded', 'false')
       return
     }
     if (openKey === 'overview') {
@@ -746,7 +850,7 @@ export function mountQuotaCard({
       panel.setAttribute('aria-label', copy.title)
       panel.hidden = false
       placePanel()
-      ball.setAttribute('aria-expanded', 'true')
+      surface.setAttribute('aria-expanded', 'true')
       return
     }
     const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
@@ -762,7 +866,7 @@ export function mountQuotaCard({
     panel.setAttribute('aria-label', panelNav ? `${copy.providerNames[openKey]} · ${copy.title}` : copy.providerNames[openKey])
     panel.hidden = false
     placePanel()
-    ball.setAttribute('aria-expanded', 'true')
+    surface.setAttribute('aria-expanded', 'true')
   }
 
   const applyArc = (circle, model) => {
@@ -775,34 +879,45 @@ export function mountQuotaCard({
     circle.classList.toggle('danger', pct !== null && pct > 95)
   }
 
-  const renderBallFace = () => {
+  const renderFloatFace = () => {
     const providers = snapshot?.providers ?? []
     const glm = glmRowModel(providers.find((provider) => provider?.key === 'glm'))
     const copilot = copilotRowModel(providers.find((provider) => provider?.key === 'copilot'))
-    floatHost.hidden = glm === null && copilot === null
-    if (floatHost.hidden) {
-      if (openKey !== undefined) {
-        openKey = undefined
-        syncPop()
-      }
-      return
+    dataHidden = glm === null && copilot === null
+    if (dataHidden && openKey !== undefined) {
+      openKey = undefined
+      syncPop()
     }
-    applyArc(ball.querySelector('.dqw-ring-glm'), glm)
-    applyArc(ball.querySelector('.dqw-ring-copilot'), copilot)
-    const alert = [glm, copilot].some((model) => model !== null && typeof model.percent === 'number' && model.percent > 95)
-    if (alert) ball.setAttribute('data-alert', 'true')
-    else ball.removeAttribute('data-alert')
+    syncFloatVisibility()
+    if (floatHost.hidden) return
+    if (surface.dataset.dshQuotaWatchCapsule !== undefined) {
+      const paint = (span, model) => {
+        const visible = model !== null && typeof model.percent === 'number' && Number.isFinite(model.percent)
+        span.textContent = visible ? `${model.label} ${formatPercent(model.percent, locale)}` : ''
+        span.classList.toggle('warn', visible && model.percent > 80 && model.percent <= 95)
+        span.classList.toggle('danger', visible && model.percent > 95)
+        return visible
+      }
+      const glmVisible = paint(surface.querySelector('.dqw-capsule-glm'), glm)
+      const copilotVisible = paint(surface.querySelector('.dqw-capsule-copilot'), copilot)
+      surface.querySelector('.dqw-capsule-sep').hidden = !glmVisible || !copilotVisible
+    } else {
+      applyArc(surface.querySelector('.dqw-ring-glm'), glm)
+      applyArc(surface.querySelector('.dqw-ring-copilot'), copilot)
+      const alert = [glm, copilot].some((model) => model !== null && typeof model.percent === 'number' && model.percent > 95)
+      if (alert) surface.setAttribute('data-alert', 'true')
+      else surface.removeAttribute('data-alert')
+    }
     const summary = [glm, copilot]
       .filter(Boolean)
       .map((model) => `${model.label} ${formatPercent(model.percent, locale)}`)
       .join(' · ')
     const label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
-    ball.setAttribute('aria-label', label)
-    ball.title = label
-    ball.setAttribute('aria-expanded', String(openKey !== undefined && !panel.hidden))
+    surface.setAttribute('aria-label', label)
+    surface.title = label
   }
 
-  const onBallClick = () => {
+  const onSurfaceClick = () => {
     if (suppressNextClick) {
       suppressNextClick = false
       return
@@ -812,8 +927,71 @@ export function mountQuotaCard({
       syncPop()
       return
     }
-    openOverview(ball)
+    openOverview(surface)
   }
+  const onSurfaceKeydown = (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    onSurfaceClick()
+  }
+  /** Swap ball ↔ capsule: persist, close the panel, rebuild and re-wire the surface. */
+  const setFloatMode = (nextMode) => {
+    saveFloatMode(win.localStorage, nextMode)
+    openKey = undefined
+    menu.hidden = true
+    syncPop()
+    const previous = surface
+    surface = nextMode === 'capsule' ? buildCapsule() : buildBall()
+    previous.replaceWith(surface)
+    surface.addEventListener('click', onSurfaceClick)
+    surface.addEventListener('keydown', onSurfaceKeydown)
+    surface.addEventListener('contextmenu', onSurfaceContext)
+    disposeDrag()
+    disposeDrag = attachDrag(surface)
+    renderFloatFace()
+  }
+  const hasCardMount = () => Boolean(footArea(doc))
+  const openMenu = () => {
+    const isBall = surface.dataset.dshQuotaWatchBall !== undefined
+    const items = [menuItem(doc, 'toggle-mode', isBall ? copy.menu.toggleToCapsule : copy.menu.toggleToBall)]
+    if (hasCardMount()) {
+      items.push(menuItem(doc, 'toggle-card', surfaceFlags.cardHidden ? copy.menu.showCard : copy.menu.hideCard))
+    }
+    items.push(menuItem(doc, 'refresh', copy.menu.refreshNow))
+    items.push(menuItem(doc, 'hide-ball', copy.menu.hideBall))
+    menu.replaceChildren(...items)
+    menu.hidden = false
+    const rect = surface.getBoundingClientRect()
+    const viewWidth = win.innerWidth ?? 1024
+    const viewHeight = win.innerHeight ?? 768
+    const width = menu.offsetWidth || 150
+    const height = menu.offsetHeight || 120
+    let left = rect.right + 8
+    if (left + width > viewWidth - 8) left = Math.max(8, rect.left - width - 8)
+    const top = Math.min(Math.max(rect.top, 8), Math.max(8, viewHeight - height - 8))
+    menu.style.left = `${Math.round(left)}px`
+    menu.style.top = `${Math.round(top)}px`
+  }
+  const onSurfaceContext = (event) => {
+    event.preventDefault()
+    openMenu()
+  }
+  const onMenuClick = (event) => {
+    const item = event.target?.closest?.('[data-menu]')
+    if (!item) return
+    const action = item.dataset.menu
+    if (action === 'toggle-mode') {
+      setFloatMode(surface.dataset.dshQuotaWatchBall !== undefined ? 'capsule' : 'ball')
+    } else if (action === 'toggle-card') {
+      setCardHidden(!surfaceFlags.cardHidden)
+    } else if (action === 'refresh') {
+      void poll(true)
+    } else if (action === 'hide-ball') {
+      setBallSessionHidden(true)
+    }
+    menu.hidden = true
+  }
+  menu.addEventListener('click', onMenuClick)
 
   const renderAll = () => {
     const providers = snapshot?.providers ?? []
@@ -826,7 +1004,7 @@ export function mountQuotaCard({
     if (glmParts) fragment.append(...glmParts)
     if (copilotParts) fragment.append(...copilotParts)
     body.replaceChildren(fragment)
-    container.hidden = glmParts === null && copilotParts === null
+    container.hidden = surfaceFlags.cardHidden || (glmParts === null && copilotParts === null)
     const updated = formatTime(snapshot?.updatedAt ? new Date(snapshot.updatedAt).toISOString() : '', locale)
     if (updated) {
       lastUpdated.hidden = true
@@ -835,7 +1013,7 @@ export function mountQuotaCard({
       lastUpdated.textContent = copy.loading
     }
     syncPop()
-    renderBallFace()
+    renderFloatFace()
   }
 
   const render = (next) => {
@@ -947,17 +1125,22 @@ export function mountQuotaCard({
   const onDocPointerDown = (event) => {
     if (openKey === undefined) return
     const path = typeof event.composedPath === 'function' ? event.composedPath() : []
-    if (path.includes(panel) || path.includes(container)) return
+    if (path.includes(panel) || path.includes(menu) || path.includes(container)) return
     const target = event.target
-    if (target === panel || target === container) return
-    if (target?.getRootNode?.() === cardRoot) return
+    if (target === panel || target === menu || target === container) return
+    if (target?.getRootNode?.() === cardRoot || target?.getRootNode?.() === floatRoot) return
     openKey = undefined
     renderAll()
   }
   const onDocScroll = () => { placePanel() }
   const onWinResize = () => { placePanel() }
   const onDocKeydown = (event) => {
-    if (event.key === 'Escape' && openKey !== undefined) {
+    if (event.key !== 'Escape') return
+    if (!menu.hidden) {
+      menu.hidden = true
+      return
+    }
+    if (openKey !== undefined) {
       openKey = undefined
       renderAll()
     }
@@ -965,7 +1148,10 @@ export function mountQuotaCard({
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
   panel.addEventListener('click', onPanelClick)
-  ball.addEventListener('click', onBallClick)
+  surface.addEventListener('click', onSurfaceClick)
+  surface.addEventListener('keydown', onSurfaceKeydown)
+  surface.addEventListener('contextmenu', onSurfaceContext)
+  let disposeDrag = attachDrag(surface)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
   doc.addEventListener('scroll', onDocScroll, true)
@@ -985,7 +1171,10 @@ export function mountQuotaCard({
     body.removeEventListener('click', onBodyClick)
     body.removeEventListener('keydown', onBodyKeydown)
     panel.removeEventListener('click', onPanelClick)
-    ball.removeEventListener('click', onBallClick)
+    surface.removeEventListener('click', onSurfaceClick)
+    surface.removeEventListener('keydown', onSurfaceKeydown)
+    surface.removeEventListener('contextmenu', onSurfaceContext)
+    menu.removeEventListener('click', onMenuClick)
     disposeDrag()
     container.remove()
     panel.remove()
