@@ -1,11 +1,17 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
+import { clampPoint } from './client/prefs.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
 
 const CARD_SELECTOR = '[data-dsh-quota-watch-card]'
 const FETCH_TIMEOUT_MS = 15_000
+const BALL_SIZE = 38
+const BALL_MARGIN = 16
+const RING_RADIUS = 15
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+const RING_HALF_GAP = 2
 
 const COPY = {
   zh: {
@@ -67,8 +73,8 @@ const COPY = {
 }
 
 const STYLE_TEXT = `
-[data-dsh-quota-watch-card] { box-sizing: border-box; width: 100%; margin: 0 0 8px; color: var(--dsw-alias-label-primary, inherit); font: inherit; }
-[data-dsh-quota-watch-card] *, [data-dsh-quota-watch-card] *::before, [data-dsh-quota-watch-card] *::after { box-sizing: border-box; }
+:host { box-sizing: border-box; width: 100%; margin: 0 0 8px; color: var(--dsw-alias-label-primary, inherit); font: inherit; }
+:host *, :host *::before, :host *::after { box-sizing: border-box; }
 .dqw-card { border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); padding: 5px 8px; display: flex; flex-direction: column; gap: 2px; }
 .dqw-meta { margin: 0; font-size: 10px; line-height: 14px; opacity: .7; }
 .dqw-body { display: flex; flex-direction: column; }
@@ -89,17 +95,6 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dqw-panel { position: fixed; z-index: 2147483000; width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
-.dqw-panel[hidden] { display: none; }
-.dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
-.dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dqw-panel-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; flex: 1; min-width: 0; }
-.dqw-panel-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
-.dqw-panel-back svg { display: block; width: 16px; height: 16px; }
-.dqw-panel-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
-.dqw-panel-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
-.dqw-panel-close:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
 .dqw-overview-row { display: flex; align-items: center; width: 100%; gap: 6px; margin: 0; padding: 5px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .dqw-overview-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
@@ -124,6 +119,38 @@ const STYLE_TEXT = `
 .dqw-win-used { opacity: .65; white-space: nowrap; }
 .dqw-win-val { min-width: 0; font-weight: 600; }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
+`
+
+// Float shell (ball today; capsule/menu later) and the panel live on their own
+// shadow host at the document root — ADR 0001 isolation, and survival without
+// any sidebar DOM (collapsed sidebar, desktop profile).
+const FLOAT_STYLE_TEXT = `
+:host { position: fixed; z-index: 2147483000; }
+.dqw-ball { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: 0; padding: 0; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 50%; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; cursor: pointer; }
+.dqw-ball:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
+.dqw-ball:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
+.dqw-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.dqw-ring-track { fill: none; stroke: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); stroke-width: 3.5; }
+.dqw-ring-glm { fill: none; stroke: var(--dsw-alias-button-primary-fill, #5b8def); stroke-width: 3.5; stroke-linecap: round; transition: stroke-dasharray .3s ease; }
+.dqw-ring-copilot { fill: none; stroke: var(--dsw-alias-label-success, #3fb950); stroke-width: 3.5; stroke-linecap: round; transition: stroke-dasharray .3s ease; }
+.dqw-ring-glm.warn, .dqw-ring-copilot.warn { stroke: var(--dsw-alias-label-warning, #d29922); }
+.dqw-ring-glm.danger, .dqw-ring-copilot.danger { stroke: var(--dsw-alias-label-danger, #c93c3c); }
+.dqw-ball > svg:not(.dqw-ring) { position: relative; width: 16px; height: 16px; }
+@media (prefers-reduced-motion: no-preference) {
+  .dqw-ball[data-alert] { animation: dqw-ball-pulse 1.6s ease-in-out infinite; }
+}
+@keyframes dqw-ball-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+.dqw-panel { position: fixed; width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
+.dqw-panel[hidden] { display: none; }
+.dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
+.dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dqw-panel-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; flex: 1; min-width: 0; }
+.dqw-panel-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
+.dqw-panel-back svg { display: block; width: 16px; height: 16px; }
+.dqw-panel-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-panel-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+.dqw-panel-close:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 `
 
 function localeFor(win) {
@@ -201,6 +228,37 @@ function quotaIcon(doc) {
   hub.setAttribute('fill', 'currentColor')
   hub.setAttribute('stroke', 'none')
   svg.append(dial, ticks, needle, hub)
+  return svg
+}
+
+/** Segmented quota ring: GLM owns the top half, Copilot the bottom half. */
+function ringSvg(doc) {
+  const namespace = 'http://www.w3.org/2000/svg'
+  const svg = doc.createElementNS(namespace, 'svg')
+  svg.setAttribute('class', 'dqw-ring')
+  svg.setAttribute('viewBox', '0 0 38 38')
+  svg.setAttribute('aria-hidden', 'true')
+  svg.setAttribute('focusable', 'false')
+  const track = doc.createElementNS(namespace, 'circle')
+  track.setAttribute('class', 'dqw-ring-track')
+  const glm = doc.createElementNS(namespace, 'circle')
+  glm.setAttribute('class', 'dqw-ring-glm')
+  glm.setAttribute('transform', 'rotate(-90 19 19)')
+  const copilot = doc.createElementNS(namespace, 'circle')
+  copilot.setAttribute('class', 'dqw-ring-copilot')
+  copilot.setAttribute('transform', 'rotate(90 19 19)')
+  track.setAttribute('cx', '19')
+  track.setAttribute('cy', '19')
+  track.setAttribute('r', String(RING_RADIUS))
+  track.setAttribute('fill', 'none')
+  for (const circle of [glm, copilot]) {
+    circle.setAttribute('cx', '19')
+    circle.setAttribute('cy', '19')
+    circle.setAttribute('r', String(RING_RADIUS))
+    circle.setAttribute('fill', 'none')
+    circle.setAttribute('stroke-dasharray', `0 ${RING_CIRCUMFERENCE}`)
+  }
+  svg.append(track, glm, copilot)
   return svg
 }
 
@@ -323,6 +381,34 @@ export function mountQuotaCard({
   panel.dataset.dshQuotaWatchPanel = ''
   panel.hidden = true
   doc.body.append(panel)
+  // Float shell host at the document root; survives sidebar absence entirely.
+  const floatHost = doc.createElement('div')
+  floatHost.dataset.dshQuotaWatchFloat = ''
+  const floatRoot = floatHost.attachShadow({ mode: 'open' })
+  floatRoot.append(text(doc, 'style', '', FLOAT_STYLE_TEXT))
+  const ball = doc.createElement('button')
+  ball.type = 'button'
+  ball.className = 'dqw-ball'
+  ball.dataset.dshQuotaWatchBall = ''
+  ball.setAttribute('aria-haspopup', 'dialog')
+  ball.setAttribute('aria-expanded', 'false')
+  ball.append(ringSvg(doc), quotaIcon(doc))
+  floatRoot.append(ball)
+  doc.documentElement.append(floatHost)
+  const applyFloatGeometry = () => {
+    const viewWidth = win.innerWidth ?? 1024
+    const viewHeight = win.innerHeight ?? 768
+    const point = clampPoint(
+      { x: viewWidth - BALL_MARGIN - BALL_SIZE, y: viewHeight - BALL_MARGIN - BALL_SIZE },
+      { width: viewWidth, height: viewHeight },
+      BALL_SIZE,
+    )
+    floatHost.style.left = `${Math.round(point.x)}px`
+    floatHost.style.top = `${Math.round(point.y)}px`
+  }
+  applyFloatGeometry()
+  // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
+  floatRoot.append(panel)
   let snapshot
   let requestSequence = 0
   let timer
@@ -594,6 +680,7 @@ export function mountQuotaCard({
       delete panel.dataset.dshQuotaWatchPanelOverview
       lastAnchor = null
       panelNav = false
+      ball.setAttribute('aria-expanded', 'false')
       return
     }
     if (openKey === 'overview') {
@@ -603,6 +690,7 @@ export function mountQuotaCard({
       panel.setAttribute('aria-label', copy.title)
       panel.hidden = false
       placePanel()
+      ball.setAttribute('aria-expanded', 'true')
       return
     }
     const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
@@ -618,6 +706,53 @@ export function mountQuotaCard({
     panel.setAttribute('aria-label', panelNav ? `${copy.providerNames[openKey]} · ${copy.title}` : copy.providerNames[openKey])
     panel.hidden = false
     placePanel()
+    ball.setAttribute('aria-expanded', 'true')
+  }
+
+  const applyArc = (circle, model) => {
+    const pct = model && typeof model.percent === 'number' && Number.isFinite(model.percent)
+      ? Math.max(0, Math.min(100, model.percent))
+      : null
+    const fill = pct === null ? 0 : (pct / 100) * (RING_CIRCUMFERENCE / 2 - RING_HALF_GAP)
+    circle.setAttribute('stroke-dasharray', `${fill.toFixed(2)} ${(RING_CIRCUMFERENCE - fill).toFixed(2)}`)
+    circle.classList.toggle('warn', pct !== null && pct > 80 && pct <= 95)
+    circle.classList.toggle('danger', pct !== null && pct > 95)
+  }
+
+  const renderBallFace = () => {
+    const providers = snapshot?.providers ?? []
+    const glm = glmRowModel(providers.find((provider) => provider?.key === 'glm'))
+    const copilot = copilotRowModel(providers.find((provider) => provider?.key === 'copilot'))
+    floatHost.hidden = glm === null && copilot === null
+    if (floatHost.hidden) {
+      if (openKey !== undefined) {
+        openKey = undefined
+        syncPop()
+      }
+      return
+    }
+    applyArc(ball.querySelector('.dqw-ring-glm'), glm)
+    applyArc(ball.querySelector('.dqw-ring-copilot'), copilot)
+    const alert = [glm, copilot].some((model) => model !== null && typeof model.percent === 'number' && model.percent > 95)
+    if (alert) ball.setAttribute('data-alert', 'true')
+    else ball.removeAttribute('data-alert')
+    const summary = [glm, copilot]
+      .filter(Boolean)
+      .map((model) => `${model.label} ${formatPercent(model.percent, locale)}`)
+      .join(' · ')
+    const label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
+    ball.setAttribute('aria-label', label)
+    ball.title = label
+    ball.setAttribute('aria-expanded', String(openKey !== undefined && !panel.hidden))
+  }
+
+  const onBallClick = () => {
+    if (openKey === 'overview' && !panel.hidden) {
+      openKey = undefined
+      syncPop()
+      return
+    }
+    openOverview(ball)
   }
 
   const renderAll = () => {
@@ -640,6 +775,7 @@ export function mountQuotaCard({
       lastUpdated.textContent = copy.loading
     }
     syncPop()
+    renderBallFace()
   }
 
   const render = (next) => {
@@ -769,6 +905,7 @@ export function mountQuotaCard({
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
   panel.addEventListener('click', onPanelClick)
+  ball.addEventListener('click', onBallClick)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
   doc.addEventListener('scroll', onDocScroll, true)
@@ -788,8 +925,10 @@ export function mountQuotaCard({
     body.removeEventListener('click', onBodyClick)
     body.removeEventListener('keydown', onBodyKeydown)
     panel.removeEventListener('click', onPanelClick)
+    ball.removeEventListener('click', onBallClick)
     container.remove()
     panel.remove()
+    floatHost.remove()
   }
 }
 
