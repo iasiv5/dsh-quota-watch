@@ -1,17 +1,14 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { clampPoint, loadFloatGeometry, loadFloatMode, loadSurfaceFlags, saveFloatGeometry, saveFloatMode, saveSurfaceFlags } from './client/prefs.mjs'
+import { clampPoint, loadFloatGeometry, loadSurfaceFlags, saveFloatGeometry, saveSurfaceFlags } from './client/prefs.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
 
 const CARD_SELECTOR = '[data-dsh-quota-watch-card]'
 const FETCH_TIMEOUT_MS = 15_000
-const BALL_SIZE = 38
-const BALL_MARGIN = 16
-const RING_RADIUS = 15
-const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
-const RING_HALF_GAP = 2
+const SURFACE_SIZE = 38
+const SURFACE_MARGIN = 16
 
 const COPY = {
   zh: {
@@ -19,13 +16,11 @@ const COPY = {
     openDetails: '查看详情',
     close: '关闭',
     menu: {
-      toggleToBall: '切为悬浮球',
-      toggleToCapsule: '切为胶囊',
       showCard: '显示侧边栏卡片',
       hideCard: '隐藏侧边栏卡片',
       refreshNow: '立即刷新',
-      hideBall: '隐藏悬浮球',
-      showBall: '显示悬浮球',
+      hideBall: '隐藏悬浮胶囊',
+      showBall: '显示悬浮胶囊',
     },
     backToOverview: '返回额度概览',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
@@ -56,13 +51,11 @@ const COPY = {
     openDetails: 'View details',
     close: 'Close',
     menu: {
-      toggleToBall: 'Switch to ball',
-      toggleToCapsule: 'Switch to capsule',
       showCard: 'Show sidebar card',
       hideCard: 'Hide sidebar card',
       refreshNow: 'Refresh now',
-      hideBall: 'Hide floating ball',
-      showBall: 'Show floating ball',
+      hideBall: 'Hide floating capsule',
+      showBall: 'Show floating capsule',
     },
     backToOverview: 'Back to quota overview',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
@@ -118,11 +111,59 @@ const STYLE_TEXT = `
 .dqw-ball-toggle[data-ball-hidden="true"] { color: var(--dsw-alias-button-primary-fill, #5b8def); }
 .dqw-ball-toggle:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
 .dqw-ball-toggle svg { display: block; width: 14px; height: 14px; }
+`
+
+// Float shell (capsule) and the panel live on their own shadow host at the
+// document root — ADR 0001 isolation, and survival without any sidebar DOM
+// (collapsed sidebar, desktop profile). Panel content shares the card's visual
+// language, so the row/detail rules are duplicated into THIS shadow root; the
+// card shadow keeps its own copies for the sidebar rows.
+const FLOAT_STYLE_TEXT = `
+:host { position: fixed; z-index: 2147483000; }
+.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; }
+.dqw-capsule:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
+.dqw-capsule:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
+.dqw-capsule-sep { opacity: .5; }
+.dqw-capsule-glm, .dqw-capsule-copilot { font-variant-numeric: tabular-nums; font-weight: 600; }
+.dqw-capsule-glm.warn, .dqw-capsule-copilot.warn { color: var(--dsw-alias-label-warning, #d29922); }
+.dqw-capsule-glm.danger, .dqw-capsule-copilot.danger { color: var(--dsw-alias-label-danger, #c93c3c); }
+@media (prefers-reduced-motion: no-preference) {
+  .dqw-capsule[data-alert] { animation: dqw-pulse 1.6s ease-in-out infinite; }
+}
+@keyframes dqw-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+.dqw-menu { position: fixed; min-width: 150px; padding: 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 88%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); font: inherit; display: flex; flex-direction: column; }
+.dqw-menu[hidden] { display: none; }
+.dqw-menu-item { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 16px; text-align: left; cursor: pointer; }
+.dqw-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
+.dqw-panel { position: fixed; width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
+.dqw-panel[hidden] { display: none; }
+.dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
+.dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.dqw-panel-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; flex: 1; min-width: 0; }
+.dqw-panel-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
+.dqw-panel-back svg { display: block; width: 16px; height: 16px; }
+.dqw-panel-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-panel-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+.dqw-panel-close:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
-.dqw-overview-row { display: flex; align-items: center; width: 100%; gap: 6px; margin: 0; padding: 5px 4px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.dqw-overview-row:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
-.dqw-overview-row:focus-visible { outline: 1px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: -1px; }
-.dqw-overview-error { display: flex; align-items: center; gap: 6px; padding: 5px 4px; }
+.dqw-row-summary { display: flex; align-items: center; gap: 6px; padding: 3px 6px; margin: 0 -2px; border-radius: 8px; }
+.dqw-row-summary[data-expandable] { cursor: pointer; }
+.dqw-row-summary[data-expandable]:hover { background: var(--dsw-alias-bg-hover, rgba(128,128,128,.12)); }
+.dqw-row-summary:focus-visible { outline: 1px solid var(--dsw-alias-button-primary-fill, #5b8def); outline-offset: -1px; }
+.dqw-row-summary.is-error { cursor: default; }
+.dqw-label { font-size: 11px; font-weight: 600; width: 52px; flex: none; }
+.dqw-label[data-action="refresh"] { cursor: pointer; border-radius: 4px; }
+.dqw-label[data-action="refresh"]:hover { opacity: .75; }
+.dqw-bar { display: block; flex: 1; height: 4px; overflow: hidden; border-radius: 4px; background: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); }
+.dqw-bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--dsw-alias-button-primary-fill, #5b8def); }
+.dqw-bar-fill.warn { background: var(--dsw-alias-label-warning, #d29922); }
+.dqw-bar-fill.danger { background: var(--dsw-alias-label-danger, #c93c3c); }
+.dqw-pct { font-size: 10.5px; line-height: 14px; font-variant-numeric: tabular-nums; width: 30px; text-align: right; flex: none; }
+.dqw-extra { font-size: 10px; line-height: 14px; opacity: .72; font-variant-numeric: tabular-nums; flex: none; min-width: 34px; text-align: right; }
+.dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
+.dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
+.dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dqw-bignums { display: flex; gap: 6px; }
 .dqw-big { flex: 1; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); border-radius: 8px; padding: 5px 8px; }
 .dqw-big .dqw-big-value { font-size: 15px; font-weight: 650; line-height: 19px; font-variant-numeric: tabular-nums; }
@@ -142,49 +183,6 @@ const STYLE_TEXT = `
 .dqw-win-used { opacity: .65; white-space: nowrap; }
 .dqw-win-val { min-width: 0; font-weight: 600; }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
-`
-
-// Float shell (ball today; capsule/menu later) and the panel live on their own
-// shadow host at the document root — ADR 0001 isolation, and survival without
-// any sidebar DOM (collapsed sidebar, desktop profile).
-const FLOAT_STYLE_TEXT = `
-:host { position: fixed; z-index: 2147483000; }
-.dqw-ball { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 38px; margin: 0; padding: 0; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 50%; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; cursor: pointer; }
-.dqw-ball:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
-.dqw-ball:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
-.dqw-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
-.dqw-ring-track { fill: none; stroke: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); stroke-width: 3.5; }
-.dqw-ring-glm { fill: none; stroke: var(--dsw-alias-button-primary-fill, #5b8def); stroke-width: 3.5; stroke-linecap: round; transition: stroke-dasharray .3s ease; }
-.dqw-ring-copilot { fill: none; stroke: var(--dsw-alias-label-success, #3fb950); stroke-width: 3.5; stroke-linecap: round; transition: stroke-dasharray .3s ease; }
-.dqw-ring-glm.warn, .dqw-ring-copilot.warn { stroke: var(--dsw-alias-label-warning, #d29922); }
-.dqw-ring-glm.danger, .dqw-ring-copilot.danger { stroke: var(--dsw-alias-label-danger, #c93c3c); }
-.dqw-ball > svg:not(.dqw-ring) { position: relative; width: 16px; height: 16px; }
-.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; }
-.dqw-capsule:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
-.dqw-capsule:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
-.dqw-capsule-sep { opacity: .5; }
-.dqw-capsule-glm, .dqw-capsule-copilot { font-variant-numeric: tabular-nums; font-weight: 600; }
-.dqw-capsule-glm.warn, .dqw-capsule-copilot.warn { color: var(--dsw-alias-label-warning, #d29922); }
-.dqw-capsule-glm.danger, .dqw-capsule-copilot.danger { color: var(--dsw-alias-label-danger, #c93c3c); }
-.dqw-menu { position: fixed; min-width: 150px; padding: 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 88%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); font: inherit; display: flex; flex-direction: column; }
-.dqw-menu[hidden] { display: none; }
-.dqw-menu-item { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 16px; text-align: left; cursor: pointer; }
-.dqw-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
-@media (prefers-reduced-motion: no-preference) {
-  .dqw-ball[data-alert] { animation: dqw-ball-pulse 1.6s ease-in-out infinite; }
-}
-@keyframes dqw-ball-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
-.dqw-panel { position: fixed; width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
-.dqw-panel[hidden] { display: none; }
-.dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
-.dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.dqw-panel-title { margin: 0; font-size: 11px; font-weight: 600; line-height: 16px; flex: 1; min-width: 0; }
-.dqw-panel-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
-.dqw-panel-back svg { display: block; width: 16px; height: 16px; }
-.dqw-panel-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
-.dqw-panel-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
-.dqw-panel-close:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 `
 
 function localeFor(win) {
@@ -276,37 +274,7 @@ function menuItem(doc, action, label) {
   return item
 }
 
-/** Segmented quota ring: GLM owns the top half, Copilot the bottom half. */
-function ringSvg(doc) {
-  const namespace = 'http://www.w3.org/2000/svg'
-  const svg = doc.createElementNS(namespace, 'svg')
-  svg.setAttribute('class', 'dqw-ring')
-  svg.setAttribute('viewBox', '0 0 38 38')
-  svg.setAttribute('aria-hidden', 'true')
-  svg.setAttribute('focusable', 'false')
-  const track = doc.createElementNS(namespace, 'circle')
-  track.setAttribute('class', 'dqw-ring-track')
-  const glm = doc.createElementNS(namespace, 'circle')
-  glm.setAttribute('class', 'dqw-ring-glm')
-  glm.setAttribute('transform', 'rotate(-90 19 19)')
-  const copilot = doc.createElementNS(namespace, 'circle')
-  copilot.setAttribute('class', 'dqw-ring-copilot')
-  copilot.setAttribute('transform', 'rotate(90 19 19)')
-  track.setAttribute('cx', '19')
-  track.setAttribute('cy', '19')
-  track.setAttribute('r', String(RING_RADIUS))
-  track.setAttribute('fill', 'none')
-  for (const circle of [glm, copilot]) {
-    circle.setAttribute('cx', '19')
-    circle.setAttribute('cy', '19')
-    circle.setAttribute('r', String(RING_RADIUS))
-    circle.setAttribute('fill', 'none')
-    circle.setAttribute('stroke-dasharray', `0 ${RING_CIRCUMFERENCE}`)
-  }
-  svg.append(track, glm, copilot)
-  return svg
-}
-
+/** Double-chevron icon for the panel's back affordance. */
 function backIcon(doc) {
   const namespace = 'http://www.w3.org/2000/svg'
   const svg = doc.createElementNS(namespace, 'svg')
@@ -437,16 +405,6 @@ export function mountQuotaCard({
   floatHost.dataset.dshQuotaWatchFloat = ''
   const floatRoot = floatHost.attachShadow({ mode: 'open' })
   floatRoot.append(text(doc, 'style', '', FLOAT_STYLE_TEXT))
-  const buildBall = () => {
-    const el = doc.createElement('button')
-    el.type = 'button'
-    el.className = 'dqw-ball'
-    el.dataset.dshQuotaWatchBall = ''
-    el.setAttribute('aria-haspopup', 'dialog')
-    el.setAttribute('aria-expanded', 'false')
-    el.append(ringSvg(doc), quotaIcon(doc))
-    return el
-  }
   const buildCapsule = () => {
     const el = doc.createElement('div')
     el.className = 'dqw-capsule'
@@ -462,8 +420,8 @@ export function mountQuotaCard({
     )
     return el
   }
-  // One surface at a time: ball (default) or capsule (persisted mode).
-  let surface = loadFloatMode(win.localStorage) === 'capsule' ? buildCapsule() : buildBall()
+  // Capsule is the only floating surface (0.1.1: the round ball was retired).
+  let surface = buildCapsule()
   floatRoot.append(surface)
   /** Session hide only hides the surface; the host stays alive for the panel. */
   const syncFloatVisibility = () => {
@@ -480,9 +438,9 @@ export function mountQuotaCard({
     const viewHeight = win.innerHeight ?? 768
     const saved = loadFloatGeometry(win.localStorage)
     const point = clampPoint(
-      saved ?? { x: viewWidth - BALL_MARGIN - BALL_SIZE, y: viewHeight - BALL_MARGIN - BALL_SIZE },
+      saved ?? { x: viewWidth - SURFACE_MARGIN - SURFACE_SIZE, y: viewHeight - SURFACE_MARGIN - SURFACE_SIZE },
       { width: viewWidth, height: viewHeight },
-      BALL_SIZE,
+      SURFACE_SIZE,
     )
     floatHost.style.left = `${Math.round(point.x)}px`
     floatHost.style.top = `${Math.round(point.y)}px`
@@ -534,7 +492,7 @@ export function mountQuotaCard({
       const point = clampPoint(
         { x: event.clientX, y: event.clientY },
         { width: viewWidth, height: viewHeight },
-        BALL_SIZE,
+        SURFACE_SIZE,
       )
       floatHost.style.left = `${Math.round(point.x)}px`
       floatHost.style.top = `${Math.round(point.y)}px`
@@ -627,45 +585,6 @@ export function mountQuotaCard({
     return [row]
   }
 
-  const renderOverviewProvider = (key, model) => {
-    if (model === null) return null
-    const label = text(doc, 'span', 'dqw-label', model.label)
-    if (model.kind === 'error') {
-      const row = doc.createElement('div')
-      row.className = 'dqw-overview-error'
-      row.append(label, text(doc, 'span', 'dqw-errtext', model.error ? `${copy.failed}: ${model.error}` : copy.failed))
-      return row
-    }
-    const row = doc.createElement('button')
-    row.type = 'button'
-    row.className = 'dqw-overview-row'
-    row.dataset.dshQuotaWatchPanelProvider = key
-    row.setAttribute('aria-expanded', 'false')
-    row.setAttribute('aria-label', `${model.label} · ${typeof model.percent === 'number' ? formatPercent(model.percent, locale) : '—'} · ${copy.openDetails}`)
-    row.append(label)
-    if (typeof model.percent === 'number' && Number.isFinite(model.percent)) {
-      const bar = doc.createElement('span')
-      bar.className = 'dqw-bar'
-      bar.setAttribute('role', 'progressbar')
-      bar.setAttribute('aria-valuemin', '0')
-      bar.setAttribute('aria-valuemax', '100')
-      bar.setAttribute('aria-valuenow', String(Math.max(0, Math.min(100, model.percent))))
-      const fill = text(doc, 'span', fillClass(model.percent))
-      fill.style.width = `${Math.max(0, Math.min(100, model.percent))}%`
-      bar.append(fill)
-      row.append(bar)
-    }
-    if (model.stale) {
-      const mark = text(doc, 'span', 'dqw-stale-mark', '⚠')
-      mark.dataset.dshQuotaWatchStale = ''
-      mark.title = model.error ?? copy.stale
-      row.append(mark)
-    }
-    row.append(text(doc, 'span', 'dqw-pct', typeof model.percent === 'number' ? formatPercent(model.percent, locale) : '—'))
-    row.append(text(doc, 'span', 'dqw-chev', '▸'))
-    return row
-  }
-
   /** Panel chrome: optional back, title, always a close affordance. */
   const panelHeader = ({ title, showBack = false }) => {
     const header = doc.createElement('div')
@@ -697,10 +616,13 @@ export function mountQuotaCard({
     const providers = snapshot?.providers ?? []
     const glm = providers.find((provider) => provider?.key === 'glm')
     const copilot = providers.find((provider) => provider?.key === 'copilot')
+    // The overview reuses the card's row-summary renderer verbatim so the
+    // panel looks exactly like the 0.0.18 sidebar rows (label · bar · percent
+    // · extra · chevron).
     const rows = [
-      renderOverviewProvider('glm', glmRowModel(glm)),
-      renderOverviewProvider('copilot', copilotRowModel(copilot)),
-    ].filter(Boolean)
+      renderProvider('glm', glmRowModel(glm)),
+      renderProvider('copilot', copilotRowModel(copilot)),
+    ].filter(Boolean).flat()
     if (rows.length === 0) {
       panel.append(text(doc, 'p', 'dqw-muted', lastUpdated.textContent || copy.loading))
       return
@@ -708,6 +630,10 @@ export function mountQuotaCard({
     const list = doc.createElement('div')
     list.className = 'dqw-overview-list'
     list.append(...rows)
+    // Tag the reused rows for the panel's own click/keyboard routing.
+    for (const row of list.querySelectorAll('[data-dsh-quota-watch-row]')) {
+      row.dataset.dshQuotaWatchPanelProvider = row.dataset.dshQuotaWatchRow
+    }
     panel.append(list)
   }
 
@@ -869,16 +795,6 @@ export function mountQuotaCard({
     surface.setAttribute('aria-expanded', 'true')
   }
 
-  const applyArc = (circle, model) => {
-    const pct = model && typeof model.percent === 'number' && Number.isFinite(model.percent)
-      ? Math.max(0, Math.min(100, model.percent))
-      : null
-    const fill = pct === null ? 0 : (pct / 100) * (RING_CIRCUMFERENCE / 2 - RING_HALF_GAP)
-    circle.setAttribute('stroke-dasharray', `${fill.toFixed(2)} ${(RING_CIRCUMFERENCE - fill).toFixed(2)}`)
-    circle.classList.toggle('warn', pct !== null && pct > 80 && pct <= 95)
-    circle.classList.toggle('danger', pct !== null && pct > 95)
-  }
-
   const renderFloatFace = () => {
     const providers = snapshot?.providers ?? []
     const glm = glmRowModel(providers.find((provider) => provider?.key === 'glm'))
@@ -890,24 +806,19 @@ export function mountQuotaCard({
     }
     syncFloatVisibility()
     if (floatHost.hidden) return
-    if (surface.dataset.dshQuotaWatchCapsule !== undefined) {
-      const paint = (span, model) => {
-        const visible = model !== null && typeof model.percent === 'number' && Number.isFinite(model.percent)
-        span.textContent = visible ? `${model.label} ${formatPercent(model.percent, locale)}` : ''
-        span.classList.toggle('warn', visible && model.percent > 80 && model.percent <= 95)
-        span.classList.toggle('danger', visible && model.percent > 95)
-        return visible
-      }
-      const glmVisible = paint(surface.querySelector('.dqw-capsule-glm'), glm)
-      const copilotVisible = paint(surface.querySelector('.dqw-capsule-copilot'), copilot)
-      surface.querySelector('.dqw-capsule-sep').hidden = !glmVisible || !copilotVisible
-    } else {
-      applyArc(surface.querySelector('.dqw-ring-glm'), glm)
-      applyArc(surface.querySelector('.dqw-ring-copilot'), copilot)
-      const alert = [glm, copilot].some((model) => model !== null && typeof model.percent === 'number' && model.percent > 95)
-      if (alert) surface.setAttribute('data-alert', 'true')
-      else surface.removeAttribute('data-alert')
+    const paint = (span, model) => {
+      const visible = model !== null && typeof model.percent === 'number' && Number.isFinite(model.percent)
+      span.textContent = visible ? `${model.label} ${formatPercent(model.percent, locale)}` : ''
+      span.classList.toggle('warn', visible && model.percent > 80 && model.percent <= 95)
+      span.classList.toggle('danger', visible && model.percent > 95)
+      return visible
     }
+    const glmVisible = paint(surface.querySelector('.dqw-capsule-glm'), glm)
+    const copilotVisible = paint(surface.querySelector('.dqw-capsule-copilot'), copilot)
+    surface.querySelector('.dqw-capsule-sep').hidden = !glmVisible || !copilotVisible
+    const alert = [glm, copilot].some((model) => model !== null && typeof model.percent === 'number' && model.percent > 95)
+    if (alert) surface.setAttribute('data-alert', 'true')
+    else surface.removeAttribute('data-alert')
     const summary = [glm, copilot]
       .filter(Boolean)
       .map((model) => `${model.label} ${formatPercent(model.percent, locale)}`)
@@ -922,7 +833,8 @@ export function mountQuotaCard({
       suppressNextClick = false
       return
     }
-    if (openKey === 'overview' && !panel.hidden) {
+    // Toggle semantics (same as the 0.0.18 rail): any open panel closes first.
+    if (openKey !== undefined && !panel.hidden) {
       openKey = undefined
       syncPop()
       return
@@ -934,26 +846,9 @@ export function mountQuotaCard({
     event.preventDefault()
     onSurfaceClick()
   }
-  /** Swap ball ↔ capsule: persist, close the panel, rebuild and re-wire the surface. */
-  const setFloatMode = (nextMode) => {
-    saveFloatMode(win.localStorage, nextMode)
-    openKey = undefined
-    menu.hidden = true
-    syncPop()
-    const previous = surface
-    surface = nextMode === 'capsule' ? buildCapsule() : buildBall()
-    previous.replaceWith(surface)
-    surface.addEventListener('click', onSurfaceClick)
-    surface.addEventListener('keydown', onSurfaceKeydown)
-    surface.addEventListener('contextmenu', onSurfaceContext)
-    disposeDrag()
-    disposeDrag = attachDrag(surface)
-    renderFloatFace()
-  }
   const hasCardMount = () => Boolean(footArea(doc))
   const openMenu = () => {
-    const isBall = surface.dataset.dshQuotaWatchBall !== undefined
-    const items = [menuItem(doc, 'toggle-mode', isBall ? copy.menu.toggleToCapsule : copy.menu.toggleToBall)]
+    const items = []
     if (hasCardMount()) {
       items.push(menuItem(doc, 'toggle-card', surfaceFlags.cardHidden ? copy.menu.showCard : copy.menu.hideCard))
     }
@@ -980,9 +875,7 @@ export function mountQuotaCard({
     const item = event.target?.closest?.('[data-menu]')
     if (!item) return
     const action = item.dataset.menu
-    if (action === 'toggle-mode') {
-      setFloatMode(surface.dataset.dshQuotaWatchBall !== undefined ? 'capsule' : 'ball')
-    } else if (action === 'toggle-card') {
+    if (action === 'toggle-card') {
       setCardHidden(!surfaceFlags.cardHidden)
     } else if (action === 'refresh') {
       void poll(true)
@@ -1148,6 +1041,15 @@ export function mountQuotaCard({
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
   panel.addEventListener('click', onPanelClick)
+  panel.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    const row = event.target?.closest?.('[data-dsh-quota-watch-panel-provider][data-expandable]')
+    if (!row) return
+    event.preventDefault()
+    openKey = row.dataset.dshQuotaWatchPanelProvider
+    panelNav = true
+    syncPop()
+  })
   surface.addEventListener('click', onSurfaceClick)
   surface.addEventListener('keydown', onSurfaceKeydown)
   surface.addEventListener('contextmenu', onSurfaceContext)

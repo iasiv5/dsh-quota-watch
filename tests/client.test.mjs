@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { mountQuotaCard } from '../src/client.mjs'
-import { FLOAT_GEOMETRY_KEY, FLOAT_MODE_KEY, SURFACE_FLAGS_KEY } from '../src/client/prefs.mjs'
+import { FLOAT_GEOMETRY_KEY, SURFACE_FLAGS_KEY } from '../src/client/prefs.mjs'
 
 function response(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
@@ -320,48 +320,39 @@ test('panel header close button closes the panel', async () => {
   window.close()
 })
 
-const floatBall = (window) =>
-  window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-ball]')
+const floatSurface = (window) =>
+  window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
 
-test('float shell mounts the ball with a segmented ring on documentElement', async () => {
+test('float shell mounts the capsule on documentElement', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   assert.ok(host, 'float host is appended to documentElement')
   assert.equal(host.parentElement, window.document.documentElement)
-  const ball = host.shadowRoot.querySelector('[data-dsh-quota-watch-ball]')
-  assert.ok(ball)
-  assert.equal(ball.getAttribute('aria-haspopup'), 'dialog')
-  assert.equal(ball.getAttribute('aria-expanded'), 'false')
-  const ring = ball.querySelector('svg.dqw-ring')
-  assert.ok(ring, 'ball carries the ring svg')
-  assert.equal(ring.getAttribute('aria-hidden'), 'true')
-  assert.ok(ring.querySelector('.dqw-ring-track'), 'ring has a track circle')
-  const glmArc = ring.querySelector('.dqw-ring-glm')
-  const copilotArc = ring.querySelector('.dqw-ring-copilot')
-  assert.ok(glmArc && copilotArc)
-  assert.match(glmArc.getAttribute('transform'), /rotate\(-90 19 19\)/)
-  assert.match(copilotArc.getAttribute('transform'), /rotate\(90 19 19\)/)
-  const center = ball.querySelector('svg:not(.dqw-ring)')
-  assert.ok(center && center.getAttribute('aria-hidden') === 'true', 'center gauge icon is decorative')
+  const capsule = host.shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
+  assert.ok(capsule, 'capsule is the only floating surface')
+  assert.equal(host.shadowRoot.querySelector('[data-dsh-quota-watch-ball]'), null, 'the round ball is retired')
+  assert.equal(capsule.getAttribute('role'), 'button')
+  assert.equal(capsule.getAttribute('tabindex'), '0')
+  assert.equal(capsule.getAttribute('aria-haspopup'), 'dialog')
+  assert.equal(capsule.getAttribute('aria-expanded'), 'false')
+  assert.ok(capsule.querySelector('.dqw-capsule-glm'), 'glm summary span renders')
+  assert.ok(capsule.querySelector('.dqw-capsule-copilot'), 'copilot summary span renders')
   dispose()
   window.close()
 })
 
-test('ring arcs reflect both providers with distinct fills', async () => {
+test('capsule spans reflect both providers', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const ball = floatBall(window)
-  const glmDash = ball.querySelector('.dqw-ring-glm').getAttribute('stroke-dasharray').split(' ').map(Number)
-  const copilotDash = ball.querySelector('.dqw-ring-copilot').getAttribute('stroke-dasharray').split(' ').map(Number)
-  assert.ok(glmDash[0] > 0, 'glm arc has a fill')
-  assert.ok(copilotDash[0] > 0, 'copilot arc has a fill')
-  assert.notEqual(glmDash[0], copilotDash[0], 'arcs differ between providers')
+  const capsule = floatSurface(window)
+  assert.match(capsule.querySelector('.dqw-capsule-glm').textContent, /GLM 13%/)
+  assert.match(capsule.querySelector('.dqw-capsule-copilot').textContent, /Copilot 24%/)
   dispose()
   window.close()
 })
 
-test('ring arcs switch color classes past usage thresholds', async () => {
+test('capsule spans switch color classes past usage thresholds', async () => {
   const cases = [
     { percent: 50, cls: null },
     { percent: 80, cls: null },
@@ -374,55 +365,65 @@ test('ring arcs switch color classes past usage thresholds', async () => {
     const provider = glmProvider()
     provider.plan.windows = [{ key: '5h', percent: item.percent }]
     const { dispose } = await mounted(window, snapshot([provider]))
-    const arc = floatBall(window).querySelector('.dqw-ring-glm')
-    assert.ok(arc, `arc for ${item.percent}`)
+    const span = floatSurface(window).querySelector('.dqw-capsule-glm')
+    assert.ok(span, `span for ${item.percent}`)
     if (item.cls === null) {
-      assert.equal(arc.classList.contains('warn'), false)
-      assert.equal(arc.classList.contains('danger'), false)
+      assert.equal(span.classList.contains('warn'), false)
+      assert.equal(span.classList.contains('danger'), false)
     } else {
-      assert.equal(arc.classList.contains(item.cls), true, `class for ${item.percent}`)
+      assert.equal(span.classList.contains(item.cls), true, `class for ${item.percent}`)
     }
     dispose()
     window.close()
   }
 })
 
-test('ball sets data-alert when any provider passes 95%', async () => {
+test('capsule sets data-alert when any provider passes 95%', async () => {
   const alertWindow = dom()
   const alertProvider = copilotProvider({ quota: { ...copilotProvider().quota, percentRemaining: 4.9 } })
   const alertMounted = await mounted(alertWindow, snapshot([glmProvider(), alertProvider]))
-  assert.equal(floatBall(alertWindow).getAttribute('data-alert'), 'true')
+  assert.equal(floatSurface(alertWindow).getAttribute('data-alert'), 'true')
   alertMounted.dispose()
   alertWindow.close()
 
   const calmWindow = dom()
   const calmProvider = copilotProvider({ quota: { ...copilotProvider().quota, percentRemaining: 50 } })
   const calmMounted = await mounted(calmWindow, snapshot([glmProvider(), calmProvider]))
-  assert.equal(floatBall(calmWindow).getAttribute('data-alert'), null)
+  assert.equal(floatSurface(calmWindow).getAttribute('data-alert'), null)
   calmMounted.dispose()
   calmWindow.close()
 })
 
-test('ball click toggles the overview panel and aria-expanded', async () => {
+test('capsule click toggles the overview panel with 0.0.18-style summary rows', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const ball = floatBall(window)
+  const capsule = floatSurface(window)
   const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(panel.hidden, false)
-  assert.notEqual(panel.dataset.dshQuotaWatchPanelOverview, undefined, 'ball opens the overview')
-  assert.equal(ball.getAttribute('aria-expanded'), 'true')
-  assert.ok(panel.style.left, 'panel positions beside the ball')
-  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  assert.notEqual(panel.dataset.dshQuotaWatchPanelOverview, undefined, 'capsule opens the overview')
+  assert.equal(capsule.getAttribute('aria-expanded'), 'true')
+  assert.ok(panel.style.left, 'panel positions beside the capsule')
+  const glmRow = panel.querySelector('[data-dsh-quota-watch-row="glm"]')
+  assert.ok(glmRow, 'overview reuses the 0.0.18 row-summary renderer')
+  assert.ok(glmRow.querySelector('.dqw-bar'), 'overview row carries its usage bar')
+  assert.match(glmRow.textContent, /13%/)
+  assert.match(glmRow.textContent, /8\.3M/)
+  assert.equal(glmRow.getAttribute('data-dsh-quota-watch-panel-provider'), 'glm')
+  glmRow.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.dataset.dshQuotaWatchPanelDetail, 'glm', 'overview row opens the detail')
+  assert.ok(panel.querySelector('[data-action="back-to-overview"]'), 'panel nav shows the back affordance')
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(panel.hidden, true)
-  assert.equal(ball.getAttribute('aria-expanded'), 'false')
+  assert.equal(capsule.getAttribute('aria-expanded'), 'false')
   dispose()
   window.close()
 })
 
-test('float shell hides when both providers are missing; empty arc collapses', async () => {
+test('float shell hides when both providers are missing', async () => {
   const empty = dom()
   const { dispose: disposeEmpty } = await mounted(empty, snapshot([
     { key: 'glm', status: 'missing', credential: 'none', displayName: 'GLM Coding Plan' },
@@ -432,23 +433,16 @@ test('float shell hides when both providers are missing; empty arc collapses', a
   assert.equal(host.hidden, true, 'no providers hides the float shell')
   disposeEmpty()
   empty.close()
-
-  const glmOnly = dom()
-  const { dispose } = await mounted(glmOnly, snapshot([glmProvider()]))
-  const arc = glmOnly.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('.dqw-ring-copilot')
-  assert.match(arc.getAttribute('stroke-dasharray'), /^0(\.0+)? /, 'missing copilot collapses its arc')
-  dispose()
-  glmOnly.close()
 })
 
-test('without a sidebar footer the float ball is the only surface', async () => {
+test('without a sidebar footer the floating capsule is the only surface', async () => {
   const window = dom({ footless: true })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   assert.equal(window.document.querySelector('[data-dsh-quota-watch-card]'), null, 'no card without footArea')
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   assert.ok(host, 'float shell still mounts')
-  const ball = host.shadowRoot.querySelector('[data-dsh-quota-watch-ball]')
-  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  const capsule = floatSurface(window)
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
   assert.equal(panel.hidden, false)
@@ -456,7 +450,7 @@ test('without a sidebar footer the float ball is the only surface', async () => 
   window.close()
 })
 
-test('ball restores persisted geometry and clamps off-screen positions', async () => {
+test('capsule restores persisted geometry and clamps off-screen positions', async () => {
   const seeded = dom()
   seeded.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":120,"y":80}')
   const seededMounted = await mounted(seeded, snapshot([glmProvider(), copilotProvider()]))
@@ -481,13 +475,13 @@ test('ball restores persisted geometry and clamps off-screen positions', async (
   window.close()
 })
 
-test('ball drag persists clamped geometry and suppresses the trailing click', async () => {
+test('capsule drag persists clamped geometry and suppresses the trailing click', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  const ball = floatBall(window)
+  const capsule = floatSurface(window)
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  ball.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
   window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 560, clientY: 520 }))
   window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 560, clientY: 520, button: 0 }))
   await turn()
@@ -496,7 +490,7 @@ test('ball drag persists clamped geometry and suppresses the trailing click', as
   assert.equal(saved.y, 520)
   assert.equal(host.style.left, '560px')
   assert.equal(host.style.top, '520px')
-  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(panel.hidden, true, 'drag suppresses the trailing click')
   dispose()
@@ -507,25 +501,24 @@ test('a press-release without movement keeps the click behavior', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  const ball = floatBall(window)
+  const capsule = floatSurface(window)
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  ball.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
-  ball.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 12, clientY: 10, button: 0 }))
-  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
+  capsule.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 12, clientY: 10, button: 0 }))
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(panel.hidden, false)
   dispose()
   window.close()
 })
 
-test('capsule mode renders a one-line summary and toggles the panel', async () => {
+test('capsule renders a one-line summary and toggles the panel', async () => {
   const window = dom()
-  window.localStorage.setItem(FLOAT_MODE_KEY, 'capsule')
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   const capsule = host.shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
-  assert.ok(capsule, 'capsule renders in capsule mode')
-  assert.equal(host.shadowRoot.querySelector('[data-dsh-quota-watch-ball]'), null, 'no ball in capsule mode')
+  assert.ok(capsule, 'capsule renders by default')
+  assert.equal(host.shadowRoot.querySelector('[data-dsh-quota-watch-ball]'), null, 'the round ball is retired')
   assert.match(capsule.textContent, /GLM 13%/)
   assert.match(capsule.textContent, /Copilot 24%/)
   assert.ok(capsule.querySelector('.dqw-capsule-sep'))
@@ -548,7 +541,6 @@ test('capsule mode renders a one-line summary and toggles the panel', async () =
 
 test('capsule omits a missing provider and its separator', async () => {
   const window = dom()
-  window.localStorage.setItem(FLOAT_MODE_KEY, 'capsule')
   const { dispose } = await mounted(window, snapshot([glmProvider()]))
   const capsule = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
   assert.match(capsule.textContent, /GLM 13%/)
@@ -560,7 +552,6 @@ test('capsule omits a missing provider and its separator', async () => {
 
 test('capsule keyboard activation opens the panel', async () => {
   const window = dom()
-  window.localStorage.setItem(FLOAT_MODE_KEY, 'capsule')
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   const capsule = host.shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
@@ -575,9 +566,8 @@ test('capsule keyboard activation opens the panel', async () => {
   window.close()
 })
 
-test('capsule drag persists geometry like the ball', async () => {
+test('capsule drag persists geometry', async () => {
   const window = dom()
-  window.localStorage.setItem(FLOAT_MODE_KEY, 'capsule')
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   const capsule = host.shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
@@ -595,7 +585,6 @@ test('capsule drag persists geometry like the ball', async () => {
 
 test('capsule percent spans switch color classes past thresholds', async () => {
   const window = dom()
-  window.localStorage.setItem(FLOAT_MODE_KEY, 'capsule')
   const provider = glmProvider()
   provider.plan.windows = [{ key: '5h', percent: 95.1 }]
   const { dispose } = await mounted(window, snapshot([provider]))
@@ -605,23 +594,23 @@ test('capsule percent spans switch color classes past thresholds', async () => {
   window.close()
 })
 
-test('ball context menu exposes the four actions', async () => {
+test('context menu exposes the actions', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
   const menu = root.querySelector('[data-dsh-quota-watch-menu]')
   assert.ok(menu, 'menu element lives in the float shadow root')
   assert.equal(menu.hidden, true)
-  root.querySelector('[data-dsh-quota-watch-ball]').dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  floatSurface(window).dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   await turn()
   assert.equal(menu.hidden, false)
   const items = [...menu.querySelectorAll('[data-menu]')].map((item) => item.dataset.menu)
-  assert.deepEqual(items, ['toggle-mode', 'toggle-card', 'refresh', 'hide-ball'])
+  assert.deepEqual(items, ['toggle-card', 'refresh', 'hide-ball'])
   dispose()
   window.close()
 })
 
-test('menu actions switch mode, persist flags, refresh and session-hide the surface', async () => {
+test('menu actions persist flags, refresh and session-hide the surface', async () => {
   const window = dom()
   const { dispose, requests } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
@@ -629,7 +618,7 @@ test('menu actions switch mode, persist flags, refresh and session-hide the surf
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
   const panel = root.querySelector('[data-dsh-quota-watch-panel]')
   const menu = root.querySelector('[data-dsh-quota-watch-menu]')
-  const surfaceEl = () => root.querySelector('[data-dsh-quota-watch-ball], [data-dsh-quota-watch-capsule]')
+  const surfaceEl = () => root.querySelector('[data-dsh-quota-watch-capsule]')
   const openMenu = async () => {
     surfaceEl().dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
     await turn()
@@ -639,14 +628,6 @@ test('menu actions switch mode, persist flags, refresh and session-hide the surf
     menu.querySelector(`[data-menu="${action}"]`).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
     await turn()
   }
-  // toggle-mode: panel closes, capsule persisted
-  surfaceEl().dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  assert.equal(panel.hidden, false)
-  await clickItem('toggle-mode')
-  assert.equal(window.localStorage.getItem(FLOAT_MODE_KEY), 'capsule')
-  assert.ok(root.querySelector('[data-dsh-quota-watch-capsule]'), 'surface rebuilt as capsule')
-  assert.equal(panel.hidden, true, 'switching mode closes the panel')
   // toggle-card: flag persisted both ways
   await clickItem('toggle-card')
   assert.deepEqual(JSON.parse(window.localStorage.getItem(SURFACE_FLAGS_KEY)), { cardHidden: true })
@@ -687,12 +668,12 @@ test('escape closes the menu first and the panel second', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
-  const ball = root.querySelector('[data-dsh-quota-watch-ball]')
+  const capsule = root.querySelector('[data-dsh-quota-watch-capsule]')
   const menu = root.querySelector('[data-dsh-quota-watch-menu]')
   const panel = root.querySelector('[data-dsh-quota-watch-panel]')
-  ball.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
-  ball.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   await turn()
   assert.equal(menu.hidden, false)
   assert.equal(panel.hidden, false)
@@ -711,10 +692,10 @@ test('footless profiles hide the toggle-card menu item', async () => {
   const window = dom({ footless: true })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
-  root.querySelector('[data-dsh-quota-watch-ball]').dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  floatSurface(window).dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   await turn()
   const items = [...root.querySelectorAll('[data-menu]')].map((item) => item.dataset.menu)
-  assert.deepEqual(items, ['toggle-mode', 'refresh', 'hide-ball'])
+  assert.deepEqual(items, ['refresh', 'hide-ball'])
   dispose()
   window.close()
 })

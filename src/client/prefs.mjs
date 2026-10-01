@@ -2,7 +2,6 @@
 // Pure logic: no DOM. `storage` is a localStorage-like object (getItem/setItem).
 
 export const FLOAT_GEOMETRY_KEY = 'dsh-quota-watch:float-geometry'
-export const FLOAT_MODE_KEY = 'dsh-quota-watch:float-mode'
 export const SURFACE_FLAGS_KEY = 'dsh-quota-watch:surface-flags'
 
 const MARGIN = 8
@@ -42,24 +41,6 @@ export function saveFloatGeometry(storage, point) {
     storage.setItem(FLOAT_GEOMETRY_KEY, JSON.stringify({ x: point.x, y: point.y }))
   } catch {
     /* storage unavailable; geometry stays session-only */
-  }
-}
-
-export function loadFloatMode(storage) {
-  try {
-    const raw = storage.getItem(FLOAT_MODE_KEY)
-    return raw === 'capsule' ? 'capsule' : 'ball'
-  } catch {
-    return 'ball'
-  }
-}
-
-export function saveFloatMode(storage, mode) {
-  if (mode !== 'ball' && mode !== 'capsule') throw new TypeError(`invalid float mode: ${mode}`)
-  try {
-    storage.setItem(FLOAT_MODE_KEY, mode)
-  } catch {
-    /* storage unavailable; mode stays session-only */
   }
 }
 

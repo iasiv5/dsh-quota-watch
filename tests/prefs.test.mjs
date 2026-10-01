@@ -2,13 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   FLOAT_GEOMETRY_KEY,
-  FLOAT_MODE_KEY,
   SURFACE_FLAGS_KEY,
   clampPoint,
   loadFloatGeometry,
   saveFloatGeometry,
-  loadFloatMode,
-  saveFloatMode,
   loadSurfaceFlags,
   saveSurfaceFlags,
 } from '../src/client/prefs.mjs'
@@ -51,18 +48,6 @@ test('loadFloatGeometry rejects non-finite coordinates', () => {
   assert.equal(loadFloatGeometry(storage), null)
   storage.setItem(FLOAT_GEOMETRY_KEY, '{"x":1}')
   assert.equal(loadFloatGeometry(storage), null)
-})
-
-test('loadFloatMode falls back to ball and rejects invalid saves', () => {
-  const storage = storageStub()
-  assert.equal(loadFloatMode(storage), 'ball')
-  storage.setItem(FLOAT_MODE_KEY, 'capsule')
-  assert.equal(loadFloatMode(storage), 'capsule')
-  storage.setItem(FLOAT_MODE_KEY, 'crap')
-  assert.equal(loadFloatMode(storage), 'ball')
-  assert.throws(() => saveFloatMode(storage, 'nope'), TypeError)
-  saveFloatMode(storage, 'capsule')
-  assert.equal(loadFloatMode(storage), 'capsule')
 })
 
 test('surface flags default to card visible and survive corruption', () => {
