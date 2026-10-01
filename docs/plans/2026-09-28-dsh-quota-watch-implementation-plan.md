@@ -34,7 +34,7 @@
 
 ## 输入工件
 
-- [领域词汇表](../../CONTEXT.md)
+- [领域词汇表](../../GLOSSARY.md)
 - 用户已确认的范围：个人使用、仅侧栏卡片、GLM 窗口遵循现有 `dsh-usage` 显示、60 秒宿主 / 30 秒可见浏览器刷新、无 PAT 路线、公开 npm 包及 bootstrap → OIDC 发布流程。
 - [dsh-usage GLM adapter](../../../.dsh-research/dsh-web/packages/dsh-usage/src/core/adapters.ts) 与 [dsh-usage PlanCard](../../../.dsh-research/dsh-web/packages/dsh-usage/src/client/UsageSectionCard.tsx)：只作行为参考，不复制实现代码。
 - [dsh-copilot-auth package pattern](../../../dsh-copilot-auth/package.json) 与 [client build wrapper](../../../dsh-copilot-auth/scripts/build-client.mjs)：独立 DSH 插件包与 browser module wrapper 的本机可运行范式。
@@ -65,7 +65,7 @@
 - Create: `.github/workflows/ci.yml` — push/PR 的 `npm ci`, tests, client build, pack check。
 - Create: `.github/workflows/publish.yml` — tag `v*` 触发；`id-token: write`、npm 11+、`npm publish --provenance --access public`。
 - Local-only: `docs/plans/2026-09-28-dsh-quota-watch-implementation-plan.md` — 本计划含维护环境命令/路径，由 package `.gitignore` 排除，不推送到公开 GitHub，也不进入 npm tarball。
-- Modify: `CONTEXT.md` — 补充“接口报告的 Copilot 剩余额度”与组织共享 billing pool 的术语边界；不加入账户数值。
+- Modify: `GLOSSARY.md` — 补充“接口报告的 Copilot 剩余额度”与组织共享 billing pool 的术语边界；不加入账户数值。
 
 ## 任务清单
 
@@ -185,7 +185,7 @@
 - Run: `npm ci && npm test && npm run build && npm run security:check && node --check lib/client.js && npm pack --dry-run --json`
 - Expected: 全部命令 exit 0；scanner 检查 worktree / pack 清单；tarball 只含 package allowlist。
 - [ ] Step 2: 初始化本地 `main`，只 stage 明确允许的项目路径并推送。
-- Run (from `/home/ubuntu/workspace/dsh-quota-watch`): `git init -b main && git remote add origin https://github.com/iasiv5/dsh-quota-watch && npm run security:check && git add package.json package-lock.json cordis.patch.yml .gitignore CONTEXT.md README.md LICENSE src scripts lib tests .github && git diff --cached --check && npm run security:check && git commit -m "feat: add DSH quota watch plugin" && git push -u origin main`
+- Run (from `/home/ubuntu/workspace/dsh-quota-watch`): `git init -b main && git remote add origin https://github.com/iasiv5/dsh-quota-watch && npm run security:check && git add package.json package-lock.json cordis.patch.yml .gitignore GLOSSARY.md README.md LICENSE src scripts lib tests .github && git diff --cached --check && npm run security:check && git commit -m "feat: add DSH quota watch plugin" && git push -u origin main`
 - Expected: GitHub 接收首个 `main` commit；staged scan 与 pack scan 均通过；`.npmrc`、`node_modules`、凭据文件、真实 API 响应与余额不进入提交。
 - [ ] Step 3: 验证 GitHub 状态。
 - Run (from project root): `git status --short --branch && git ls-remote --heads origin main`

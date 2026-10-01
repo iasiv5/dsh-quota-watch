@@ -23,7 +23,7 @@
 
 ## 输入工件
 
-- 设计共识：本会话 grill-with-docs 结论（D1–D13 见上）；`CONTEXT.md` 已含 **Used percentage** 与 **Provider usage statistic** 词条。
+- 设计共识：本会话 grill-with-docs 结论（D1–D13 见上）；`GLOSSARY.md` 已含 **Used percentage** 与 **Provider usage statistic** 词条。
 - 视觉稿：`docs/plans/2026-09-29-card-redesign-mockup.html`（示例数值为合成值）。
 - 端点事实（已实测验证）：`model-usage` 返回 `data.totalUsage.totalTokensUsage / totalModelCallCount / modelSummaryList[{modelName,totalTokens,sortOrder}]` 与逐时数组（插件不消费逐时数组，本次范围外）。
 
@@ -38,7 +38,7 @@
 - Modify: `README.md` — 功能、端点表（+`model-usage`）、已用%归一化语义、隐私说明。
 - Modify: `package.json` — `version: 0.0.3`。
 - Build artifact: `lib/client.js` — `npm run build` 重新生成并提交。
-- Modify: `CONTEXT.md` — 已完成（本计划执行前已提交，无后续改动）。
+- Modify: `GLOSSARY.md` — 已完成（本计划执行前已提交，无后续改动）。
 
 ## 任务清单
 
