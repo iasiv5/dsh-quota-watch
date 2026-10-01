@@ -56,10 +56,9 @@ function snapshot(providers) {
   return { updatedAt: Date.parse('2026-10-01T12:00:00.000Z'), providers }
 }
 
-function dom({ locale, collapsed = false } = {}) {
-  const collapsedAttr = collapsed ? ' data-sidebar-collapsed' : ''
+function dom({ locale } = {}) {
   const { window } = new JSDOM(
-    `<!doctype html><html><body><div class="frame"${collapsedAttr}><div class="sidebarCol"><div class="footArea"><div class="settingsArea"><button class="settings-trigger" type="button"><svg width="16" height="16"></svg></button></div></div></div></div></body></html>`,
+    `<!doctype html><html><body><div class="frame"><div class="sidebarCol"><div class="footArea"><div class="settingsArea"><button class="settings-trigger" type="button"><svg width="16" height="16"></svg></button></div></div></div></div></body></html>`,
     { url: 'https://dsh.example/', pretendToBeVisual: true },
   )
   if (locale) {
@@ -123,91 +122,6 @@ test('summary rows replace the expanded card and keep refresh and self-healing',
   assert.ok(window.document.querySelector('[data-dsh-quota-watch-card]'), 'observer re-seats a removed card')
   dispose()
   assert.equal(window.document.querySelector('[data-dsh-quota-watch-pop]'), null, 'dispose removes the detail popover')
-  window.close()
-})
-
-test('collapsed rail matches the settings control and opens quota summaries', async () => {
-  const window = dom({ locale: 'zh-CN', collapsed: true })
-  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const trigger = container.shadowRoot.querySelector('.dqw-rail-trigger')
-  const settingsIcon = window.document.querySelector('.settings-trigger svg')
-  assert.ok(trigger)
-  assert.equal(trigger.getAttribute('aria-label'), 'Token额度')
-  assert.equal(trigger.title, 'Token额度')
-  assert.equal(trigger.getAttribute('aria-expanded'), 'false')
-  const railIcon = trigger.querySelector('svg')
-  assert.equal(railIcon.getAttribute('width'), '16')
-  assert.equal(railIcon.getAttribute('height'), '16')
-  assert.equal(railIcon.getAttribute('width'), settingsIcon.getAttribute('width'))
-  assert.equal(railIcon.getAttribute('aria-hidden'), 'true')
-  assert.equal(railIcon.querySelectorAll('circle').length, 2)
-  assert.match(railIcon.querySelector('circle').getAttribute('r'), /^10$/)
-  assert.match(railIcon.querySelector('path').getAttribute('d'), /M12 2\.4/)
-  const styles = container.shadowRoot.querySelector('style').textContent
-  assert.ok(styles.includes('[data-sidebar-collapsed] [data-dsh-quota-watch-card]'))
-  assert.ok(styles.includes('width: 36px'))
-  assert.ok(styles.includes('width: 16px'))
-  assert.ok(styles.includes('border: 0'))
-  assert.ok(styles.includes('--dsw-alias-label-primary'))
-  assert.ok(styles.includes('--dsw-alias-interactive-bg-hover'))
-
-  const pop = window.document.querySelector('[data-dsh-quota-watch-pop]')
-  const click = (element) => element.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  click(trigger)
-  await turn()
-  assert.equal(pop.hidden, false)
-  assert.equal(pop.dataset.dshQuotaWatchOverview, '')
-  assert.equal(trigger.getAttribute('aria-expanded'), 'true')
-  assert.match(pop.textContent, /Token额度/)
-  assert.match(pop.textContent, /GLM/)
-  assert.match(pop.textContent, /13%/)
-  assert.match(pop.textContent, /Copilot/)
-  assert.match(pop.textContent, /24%/)
-
-  click(pop.querySelector('[data-dsh-quota-watch-pop-provider="glm"]'))
-  await turn()
-  assert.equal(pop.dataset.dshQuotaWatchDetail, 'glm')
-  assert.match(pop.textContent, /今日 Tokens/)
-  const back = pop.querySelector('[data-action="back-to-overview"]')
-  assert.equal(back.getAttribute('aria-label'), '返回额度概览')
-  assert.equal(back.textContent, '')
-  assert.ok(back.querySelector('svg'), 'back affordance renders as a double-chevron icon')
-  assert.equal(back.parentElement.className, 'dqw-pop-header')
-  assert.equal(back.nextElementSibling.textContent, 'GLM')
-  click(back)
-  await turn()
-  assert.equal(pop.dataset.dshQuotaWatchOverview, '')
-  click(pop.querySelector('[data-dsh-quota-watch-pop-provider="copilot"]'))
-  await turn()
-  const copilotBack = pop.querySelector('[data-action="back-to-overview"]')
-  assert.equal(copilotBack.nextElementSibling.textContent, 'Copilot')
-  assert.equal(copilotBack.textContent, '')
-  click(copilotBack)
-  await turn()
-  assert.equal(pop.dataset.dshQuotaWatchOverview, '')
-  click(trigger)
-  await turn()
-  assert.equal(pop.hidden, true)
-  assert.equal(trigger.getAttribute('aria-expanded'), 'false')
-  dispose()
-  window.close()
-})
-
-test('changing the sidebar mode closes a rail-anchored popover', async () => {
-  const window = dom({ collapsed: true })
-  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const frame = window.document.querySelector('.frame')
-  const trigger = window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('.dqw-rail-trigger')
-  const pop = window.document.querySelector('[data-dsh-quota-watch-pop]')
-  trigger.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  assert.equal(pop.hidden, false)
-  frame.removeAttribute('data-sidebar-collapsed')
-  await turn()
-  assert.equal(pop.hidden, true)
-  assert.equal(trigger.getAttribute('aria-expanded'), 'false')
-  dispose()
   window.close()
 })
 

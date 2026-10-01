@@ -87,14 +87,6 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dqw-rail-trigger { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-primary, inherit); cursor: pointer; transition: background-color .12s, color .12s; }
-.dqw-rail-trigger svg { display: block; width: 16px; height: 16px; }
-.dqw-rail-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
-.dqw-rail-trigger:active:not(:disabled), .dqw-rail-trigger[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.18)); color: var(--dsw-alias-label-primary, inherit); }
-.dqw-rail-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
-[data-sidebar-collapsed] [data-dsh-quota-watch-card] { display: flex; align-items: center; justify-content: center; width: 36px; margin: 0 0 12px; }
-[data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-card { display: none; }
-[data-sidebar-collapsed] [data-dsh-quota-watch-card] > .dqw-rail-trigger { display: inline-flex; }
 .dqw-pop { position: fixed; z-index: 2147483000; min-width: 166px; max-width: 320px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-pop { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
 .dqw-pop[hidden] { display: none; }
@@ -312,15 +304,6 @@ export function mountQuotaCard({
   const card = doc.createElement('section')
   card.className = 'dqw-card'
   card.setAttribute('aria-label', copy.title)
-  const railTrigger = doc.createElement('button')
-  railTrigger.type = 'button'
-  railTrigger.className = 'dqw-rail-trigger'
-  railTrigger.title = copy.title
-  railTrigger.setAttribute('aria-label', copy.title)
-  railTrigger.setAttribute('aria-haspopup', 'dialog')
-  railTrigger.setAttribute('aria-controls', 'dqw-quota-watch-pop')
-  railTrigger.setAttribute('aria-expanded', 'false')
-  railTrigger.append(quotaIcon(doc))
   const body = doc.createElement('div')
   body.className = 'dqw-body'
   // Status line doubles as the transport-error surface; hidden once data renders.
@@ -328,7 +311,7 @@ export function mountQuotaCard({
   lastUpdated.dataset.role = 'updated'
   body.append(lastUpdated)
   card.append(body)
-  cardRoot.append(style, card, railTrigger)
+  cardRoot.append(style, card)
   // Details and collapsed-rail summaries open in a viewport-level panel.
   const pop = doc.createElement('div')
   pop.className = 'dqw-pop'
@@ -343,7 +326,6 @@ export function mountQuotaCard({
   let disposed = false
   let queuedPlace = false
   let openKey
-  let popOrigin = 'row'
 
   const fillClass = (percent) => (percent > 95 ? 'dqw-bar-fill danger' : percent > 80 ? 'dqw-bar-fill warn' : 'dqw-bar-fill')
 
@@ -568,12 +550,10 @@ export function mountQuotaCard({
     }
   }
 
-  /** Anchor the popover to the rail icon or the expanded provider row. */
+  /** Anchor the popover to the expanded provider row. */
   const positionPop = () => {
     if (pop.hidden || openKey === undefined) return
-    const anchor = popOrigin === 'rail'
-      ? railTrigger
-      : body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
+    const anchor = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
     if (!anchor) return
     const rect = anchor.getBoundingClientRect()
     const viewWidth = win.innerWidth ?? 1024
@@ -590,8 +570,6 @@ export function mountQuotaCard({
   }
 
   const syncPop = () => {
-    const fromRail = popOrigin === 'rail' && openKey !== undefined && !disposed
-    railTrigger.setAttribute('aria-expanded', String(fromRail))
     if (openKey === undefined || disposed) {
       pop.hidden = true
       pop.replaceChildren()
@@ -610,15 +588,15 @@ export function mountQuotaCard({
     }
     const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
     const row = body.querySelector(`[data-dsh-quota-watch-row="${openKey}"]`)
-    if (!provider || (!fromRail && (!row || !row.hasAttribute('data-expandable')))) {
+    if (!provider || !row || !row.hasAttribute('data-expandable')) {
       openKey = undefined
       syncPop()
       return
     }
-    renderDetail(pop, openKey, provider, fromRail)
+    renderDetail(pop, openKey, provider, false)
     pop.dataset.dshQuotaWatchDetail = openKey
     delete pop.dataset.dshQuotaWatchOverview
-    pop.setAttribute('aria-label', fromRail ? `${copy.providerNames[openKey]} · ${copy.title}` : copy.providerNames[openKey])
+    pop.setAttribute('aria-label', copy.providerNames[openKey])
     pop.hidden = false
     positionPop()
   }
@@ -686,27 +664,10 @@ export function mountQuotaCard({
     })
   }
 
-  let sidebarCollapsed = Boolean(doc.querySelector('[data-sidebar-collapsed]'))
-  const syncSidebarMode = () => {
-    const nextCollapsed = Boolean(doc.querySelector('[data-sidebar-collapsed]'))
-    if (nextCollapsed === sidebarCollapsed) return
-    sidebarCollapsed = nextCollapsed
-    if (openKey !== undefined) {
-      openKey = undefined
-      popOrigin = 'row'
-      syncPop()
-    }
-  }
   const observer = new win.MutationObserver(() => {
-    syncSidebarMode()
     schedulePlace()
   })
-  observer.observe(doc.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['data-sidebar-collapsed'],
-  })
+  observer.observe(doc.body, { childList: true, subtree: true })
   place()
 
   const startPolling = () => {
@@ -723,31 +684,18 @@ export function mountQuotaCard({
     else startPolling()
   }
   const toggleRow = (key) => {
-    popOrigin = 'row'
     openKey = openKey === key ? undefined : key
     renderAll()
-  }
-  const onRailClick = () => {
-    if (popOrigin === 'rail' && openKey !== undefined) {
-      openKey = undefined
-      popOrigin = 'row'
-    } else {
-      openKey = 'overview'
-      popOrigin = 'rail'
-    }
-    syncPop()
   }
   const onPopClick = (event) => {
     if (event.target?.closest?.('[data-action="back-to-overview"]')) {
       openKey = 'overview'
-      popOrigin = 'rail'
       syncPop()
       return
     }
     const provider = event.target?.closest?.('[data-dsh-quota-watch-pop-provider]')
     if (provider) {
       openKey = provider.dataset.dshQuotaWatchPopProvider
-      popOrigin = 'rail'
       syncPop()
     }
   }
@@ -772,7 +720,6 @@ export function mountQuotaCard({
     const target = event.target
     if (pop.contains(target) || target?.closest?.('[data-dsh-quota-watch-row]') || target?.closest?.(CARD_SELECTOR)) return
     openKey = undefined
-    popOrigin = 'row'
     renderAll()
   }
   const onDocScroll = () => { positionPop() }
@@ -780,13 +727,11 @@ export function mountQuotaCard({
   const onDocKeydown = (event) => {
     if (event.key === 'Escape' && openKey !== undefined) {
       openKey = undefined
-      popOrigin = 'row'
       renderAll()
     }
   }
   body.addEventListener('click', onBodyClick)
   body.addEventListener('keydown', onBodyKeydown)
-  railTrigger.addEventListener('click', onRailClick)
   pop.addEventListener('click', onPopClick)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
@@ -806,7 +751,6 @@ export function mountQuotaCard({
     win.removeEventListener('resize', onWinResize)
     body.removeEventListener('click', onBodyClick)
     body.removeEventListener('keydown', onBodyKeydown)
-    railTrigger.removeEventListener('click', onRailClick)
     pop.removeEventListener('click', onPopClick)
     container.remove()
     pop.remove()
