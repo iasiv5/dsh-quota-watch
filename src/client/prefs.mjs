@@ -47,14 +47,15 @@ export function saveFloatGeometry(storage, point) {
 export function loadSurfaceFlags(storage) {
   try {
     const raw = storage.getItem(SURFACE_FLAGS_KEY)
-    if (typeof raw !== 'string' || raw === '') return { cardHidden: false }
+    // The sidebar card is opt-in: the floating capsule is the default surface.
+    if (typeof raw !== 'string' || raw === '') return { cardHidden: true }
     const parsed = JSON.parse(raw)
     if (typeof parsed !== 'object' || parsed === null || typeof parsed.cardHidden !== 'boolean') {
-      return { cardHidden: false }
+      return { cardHidden: true }
     }
     return { cardHidden: parsed.cardHidden }
   } catch {
-    return { cardHidden: false }
+    return { cardHidden: true }
   }
 }
 

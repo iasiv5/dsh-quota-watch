@@ -50,11 +50,11 @@ test('loadFloatGeometry rejects non-finite coordinates', () => {
   assert.equal(loadFloatGeometry(storage), null)
 })
 
-test('surface flags default to card visible and survive corruption', () => {
+test('surface flags default to card hidden (capsule-first) and survive corruption', () => {
   const storage = storageStub()
-  assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: false })
-  storage.setItem(SURFACE_FLAGS_KEY, 'not-json')
-  assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: false })
-  saveSurfaceFlags(storage, { cardHidden: true })
   assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: true })
+  storage.setItem(SURFACE_FLAGS_KEY, 'not-json')
+  assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: true })
+  saveSurfaceFlags(storage, { cardHidden: false })
+  assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: false })
 })

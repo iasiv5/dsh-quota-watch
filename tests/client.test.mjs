@@ -57,10 +57,11 @@ function snapshot(providers) {
   return { updatedAt: Date.parse('2026-10-01T12:00:00.000Z'), providers }
 }
 
-function dom({ locale, footless = false } = {}) {
+function dom({ locale, footless = false, collapsed = false } = {}) {
   const sidebar = footless ? '' : '<div class="sidebarCol"><div class="footArea"><div class="settingsArea"><button class="settings-trigger" type="button"><svg width="16" height="16"></svg></button></div></div></div>'
+  const frameAttrs = collapsed ? ' data-sidebar-collapsed' : ''
   const { window } = new JSDOM(
-    `<!doctype html><html><body><div class="frame">${sidebar}</div></body></html>`,
+    `<!doctype html><html><body><div class="frame"${frameAttrs}>${sidebar}</div></body></html>`,
     { url: 'https://dsh.example/', pretendToBeVisual: true },
   )
   if (locale) {
@@ -153,6 +154,7 @@ test('rows hide per provider state and the card hides when nothing is visible', 
     },
     {
       name: 'copilot missing leaves only the glm row',
+      preseed: '{"cardHidden":false}',
       providers: [glmProvider(), { key: 'copilot', status: 'missing', credential: 'none', displayName: 'GitHub Copilot' }],
       check(container) {
         assert.equal(container.hidden, false)
@@ -184,6 +186,7 @@ test('rows hide per provider state and the card hides when nothing is visible', 
   ]
   for (const item of cases) {
     const window = dom()
+    if (item.preseed) window.localStorage.setItem(SURFACE_FLAGS_KEY, item.preseed)
     const { dispose } = await mounted(window, snapshot(item.providers))
     const container = window.document.querySelector('[data-dsh-quota-watch-card]')
     item.check(container)
@@ -469,8 +472,7 @@ test('capsule restores persisted geometry and clamps off-screen positions', asyn
   assert.ok(left >= 8 && left <= window.innerWidth - 8 - 38, `left clamped: ${left}`)
   assert.ok(top >= 8 && top <= window.innerHeight - 8 - 38, `top clamped: ${top}`)
   const saved = JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY))
-  assert.equal(saved.x, left)
-  assert.equal(saved.y, top)
+  assert.deepEqual(saved, { x: -500, y: 99999 }, 'mount clamps visually but never clobbers the stored preference')
   dispose()
   window.close()
 })
@@ -605,18 +607,16 @@ test('context menu exposes the actions', async () => {
   await turn()
   assert.equal(menu.hidden, false)
   const items = [...menu.querySelectorAll('[data-menu]')].map((item) => item.dataset.menu)
-  assert.deepEqual(items, ['toggle-card', 'refresh', 'hide-ball'])
+  assert.deepEqual(items, ['toggle-card', 'refresh'])
   dispose()
   window.close()
 })
 
-test('menu actions persist flags, refresh and session-hide the surface', async () => {
+test('menu actions persist flags and refresh', async () => {
   const window = dom()
   const { dispose, requests } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  const root = host.shadowRoot
+  const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const panel = root.querySelector('[data-dsh-quota-watch-panel]')
   const menu = root.querySelector('[data-dsh-quota-watch-menu]')
   const surfaceEl = () => root.querySelector('[data-dsh-quota-watch-capsule]')
   const openMenu = async () => {
@@ -628,28 +628,17 @@ test('menu actions persist flags, refresh and session-hide the surface', async (
     menu.querySelector(`[data-menu="${action}"]`).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
     await turn()
   }
-  // toggle-card: flag persisted both ways
+  // toggle-card: the card is opt-in — first click reveals it, second hides it
+  assert.equal(container.hidden, true, 'card is opt-in and hidden by default')
+  await clickItem('toggle-card')
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(SURFACE_FLAGS_KEY)), { cardHidden: false })
+  assert.equal(container.hidden, false)
   await clickItem('toggle-card')
   assert.deepEqual(JSON.parse(window.localStorage.getItem(SURFACE_FLAGS_KEY)), { cardHidden: true })
   assert.equal(container.hidden, true)
-  await clickItem('toggle-card')
-  assert.equal(container.hidden, false)
   // refresh: host probe POST
   await clickItem('refresh')
   assert.deepEqual(requests.at(-1), { path: 'api/dsh-quota-watch/refresh', method: 'POST' })
-  // hide-ball: session-scoped surface hide, card row keeps the panel working
-  await clickItem('hide-ball')
-  assert.equal(surfaceEl().hidden, true)
-  assert.equal(panel.hidden, true)
-  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  assert.equal(surfaceEl().hidden, true, 'session hide survives re-renders')
-  assert.equal(panel.hidden, false, 'card rows still open the panel while the ball is hidden')
-  const toggle = container.shadowRoot.querySelector('[data-action="toggle-ball"]')
-  assert.ok(toggle, 'card exposes the ball restore toggle')
-  toggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  assert.equal(surfaceEl().hidden, false)
   dispose()
   window.close()
 })
@@ -695,7 +684,7 @@ test('footless profiles hide the toggle-card menu item', async () => {
   floatSurface(window).dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   await turn()
   const items = [...root.querySelectorAll('[data-menu]')].map((item) => item.dataset.menu)
-  assert.deepEqual(items, ['refresh', 'hide-ball'])
+  assert.deepEqual(items, ['refresh'])
   dispose()
   window.close()
 })
@@ -893,6 +882,102 @@ test('card styles live inside the shadow root, not the document', async () => {
   const shadowStyle = container.shadowRoot.querySelector('style')
   assert.ok(shadowStyle, 'style ships inside the shadow root')
   assert.match(shadowStyle.textContent, /\.dqw-row-summary/)
+  dispose()
+  window.close()
+})
+
+test('collapsed web rail hides the card; the capsule keeps the entry', async () => {
+  const window = dom({ collapsed: true })
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  assert.equal(container.hidden, true, 'card hides instead of clipping into garbled text')
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, false, 'capsule still opens the panel in the collapsed rail')
+  dispose()
+  window.close()
+})
+
+test('0.1.2 regression guards: hidden-attr display rules and 0.0.18 panel sizing', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  const floatStyle = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('style').textContent
+  const cardStyle = container.shadowRoot.querySelector('style').textContent
+  assert.match(floatStyle, /\.dqw-capsule\[hidden\]\s*{\s*display: none/, 'a hidden capsule must actually disappear (author display beats the UA [hidden] rule)')
+  assert.match(cardStyle, /@media print\s*{\s*:host { display: none !important; }/, 'card hides in print')
+  assert.match(floatStyle, /min-width: 166px/, 'panel width strategy matches the 0.0.18 pop (content-driven, capped)')
+  assert.match(floatStyle, /max-width: 240px/, 'overview bars stay at the 0.0.18 row width')
+  assert.match(cardStyle, /@media print\s*{\s*:host { display: none !important; }/, 'card hides in print')
+  dispose()
+  window.close()
+})
+
+test('the float shell is mounted at most once even without a card', async () => {
+  const window = dom({ footless: true })
+  const first = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const second = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  assert.equal(window.document.querySelectorAll('[data-dsh-quota-watch-float]').length, 1, 'no duplicate float shell on re-mount')
+  first.dispose()
+  second.dispose()
+  window.close()
+})
+
+test('a measurably narrow foot hides the card even without the collapse attribute', async () => {
+  const window = dom()
+  window.localStorage.setItem(SURFACE_FLAGS_KEY, '{"cardHidden":false}')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  const foot = window.document.querySelector('.footArea')
+  assert.equal(container.hidden, false, 'card visible at unknown width')
+  Object.defineProperty(foot, 'clientWidth', { configurable: true, value: 126 })
+  window.dispatchEvent(new window.Event('resize'))
+  await turn()
+  assert.equal(container.hidden, true, 'narrow foot hides the card')
+  Object.defineProperty(foot, 'clientWidth', { configurable: true, value: 400 })
+  window.dispatchEvent(new window.Event('resize'))
+  await turn()
+  assert.equal(container.hidden, false, 'wide foot restores the card')
+  dispose()
+  window.close()
+})
+
+test('shrinking the viewport re-clamps the capsule without clobbering stored geometry', async () => {
+  const window = dom()
+  window.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":900,"y":100}')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  assert.equal(host.style.left, '900px')
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 })
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 300 })
+  window.dispatchEvent(new window.Event('resize'))
+  await turn()
+  const left = parseFloat(host.style.left)
+  const top = parseFloat(host.style.top)
+  assert.ok(left <= 400 - 8 - 38, `left clamped into the small viewport: ${left}`)
+  assert.ok(top <= 300 - 8 - 38, `top clamped into the small viewport: ${top}`)
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY)), { x: 900, y: 100 }, 'storage keeps the preferred coordinates')
+  dispose()
+  window.close()
+})
+
+test('panel keeps its position across row re-renders and scrolls', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  const leftBefore = panel.style.left
+  const topBefore = panel.style.top
+  // The label click forces a re-probe; renderAll re-creates the anchor rows.
+  window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('.dqw-label[data-action="refresh"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  window.document.dispatchEvent(new window.Event('scroll'))
+  await turn()
+  assert.equal(panel.dataset.dshQuotaWatchPanelDetail, undefined, 'overview stays open across the re-render')
+  assert.equal(panel.style.left, leftBefore, 'scroll does not teleport the panel sideways')
+  assert.equal(panel.style.top, topBefore, 'scroll does not teleport the panel vertically')
   dispose()
   window.close()
 })
