@@ -911,9 +911,14 @@ export function mountQuotaCard({
   }
   const syncCardVisibility = () => {
     syncFootNarrowness()
+    // Rail entry follows the WIDTH signal, not the host attribute: this DSH
+    // build (0.2.0-rc.2 web) never writes data-sidebar-collapsed on collapse
+    // (verified via CDP + bundle grep), but the foot container measurably
+    // narrows — and the 36px gauge icon fits any rail.
     const cardOn = !surfaceFlags.cardHidden
-    const showCard = cardOn && !sidebarCollapsed && !footTooNarrow && !noDataHidden
-    const showRail = cardOn && sidebarCollapsed && !noDataHidden
+    const narrowOrCollapsed = footTooNarrow || sidebarCollapsed
+    const showCard = cardOn && !narrowOrCollapsed && !noDataHidden
+    const showRail = cardOn && narrowOrCollapsed && !noDataHidden
     container.hidden = !showCard && !showRail
     if (showRail) container.dataset.dshQuotaWatchSidebarCollapsed = ''
     else delete container.dataset.dshQuotaWatchSidebarCollapsed
