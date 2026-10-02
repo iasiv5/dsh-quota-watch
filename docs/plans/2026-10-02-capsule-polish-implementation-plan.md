@@ -381,7 +381,7 @@ CSS 契约（进 `FLOAT_STYLE_TEXT`）：
 
 - Run: `cd ~/workspace/dsh-quota-watch && npm run build && npm test && npm run security:check`
   - Expected: 三条全绿。
-- Run: `grep -c "loadFloatGeometry" src/client.mjs; grep -c "touch-action" src/client.mjs; grep -c "FLOAT_DOCK_KEY" src/client.mjs; grep -c "dqw-panel--sheet" src/client.mjs`
+- Run: `grep -c "loadFloatGeometry" src/client.mjs; grep -c "touch-action" src/client.mjs; grep -c "loadFloatDock" src/client.mjs; grep -c "dqw-panel--sheet" src/client.mjs`
   - Expected: `0`、`≥1`、`≥1`、`≥1`。
 - Run: `git log --oneline feat/capsule-polish ^main | wc -l`
   - Expected: ≥ 11（Task 2-12 各一 commit）。

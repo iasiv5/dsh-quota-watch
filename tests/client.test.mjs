@@ -878,6 +878,14 @@ test('release snaps to the dock through the animation path when motion is allowe
   await turn()
   assert.ok(capsule.className.includes('dqw-capsule--snapping'), 'animation path engages the snapping transition')
   assert.ok(!capsule.className.includes('dqw-capsule--dragging'))
+  // E1-1: the animation must slide toward the NEW dock (delta from rest
+  // (8,80) → dock (8,187)), never back toward the old one.
+  assert.match(capsule.style.transform, /translate3d\(0px, 107px, 0\) scale\(1\)/, 'animation targets the new dock')
+  // E1-2: the real click lands within ms of the release — suppression must be
+  // armed synchronously, not after the settle.
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, true, 'click immediately after release is suppressed')
   // jsdom never fires real transitions: the synthetic event proves the
   // transitionend branch commits; the later timer window proves first-wins.
   capsule.dispatchEvent(new window.Event('transitionend'))
@@ -891,10 +899,20 @@ test('release snaps to the dock through the animation path when motion is allowe
   const storageAfterCommit = window.localStorage.getItem(FLOAT_DOCK_KEY)
   await new Promise((resolve) => setTimeout(resolve, 260))
   assert.equal(window.localStorage.getItem(FLOAT_DOCK_KEY), storageAfterCommit, 'fallback timer after the transitionend is a no-op (first one wins)')
-  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  assert.equal(panel.hidden, true, 'the trailing click after a snap is suppressed')
   dispose()
+  window.close()
+})
+
+test('disposing mid-drag restores the body user-select', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider()]))
+  const capsule = floatSurface(window)
+  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+  window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 560, clientY: 520 }))
+  await frame(window)
+  assert.equal(window.document.body.style.userSelect, 'none', 'drag sets the body user-select')
+  dispose()
+  assert.equal(window.document.body.style.userSelect, '', 'dispose restores it even mid-gesture')
   window.close()
 })
 

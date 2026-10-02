@@ -597,13 +597,18 @@ export function mountQuotaCard({
       if (!moved) return
       const viewWidth = win.innerWidth ?? 1024
       const viewHeight = win.innerHeight ?? 768
+      const insets = readInsets()
+      const viewport = { width: viewWidth, height: viewHeight }
       const dock = releaseDock(
         { x: event.clientX, y: event.clientY },
         grab,
         dragSize,
-        { width: viewWidth, height: viewHeight },
-        readInsets(),
+        viewport,
+        insets,
       )
+      // The real click lands within ms of pointerup — suppression is armed
+      // synchronously here, never deferred to the animation's settle (E1-2).
+      suppressNextClick = true
       // jsdom has no matchMedia: the typeof guard keeps the release working
       // (direct commit) where the motion query cannot be asked at all.
       const motionAllowed = typeof win.matchMedia === 'function'
@@ -611,7 +616,11 @@ export function mountQuotaCard({
       if (motionAllowed) {
         surfaceEl.classList.remove('dqw-capsule--dragging')
         surfaceEl.classList.add('dqw-capsule--snapping')
-        surfaceEl.style.transform = 'translate3d(0px, 0px, 0) scale(1)'
+        // Animate toward the NEW dock (delta from rest) — the host still sits
+        // at the old dock until settle commits it, so (0,0) would slide the
+        // pill backwards first and then teleport (E1-1).
+        const targetLeft = dockX(dock.edge, dragSize.width, viewport, insets)
+        surfaceEl.style.transform = `translate3d(${Math.round(targetLeft - restX)}px, ${Math.round(dock.offsetY - restY)}px, 0) scale(1)`
         let settled = false
         let snapTimer
         const settle = () => {
@@ -1268,6 +1277,8 @@ export function mountQuotaCard({
     surface.removeEventListener('contextmenu', onSurfaceContext)
     menu.removeEventListener('click', onMenuClick)
     disposeDrag()
+    // A dispose landing mid-gesture must not leave the body unselectable.
+    doc.body.style.userSelect = ''
     container.remove()
     panel.remove()
     floatHost.remove()
