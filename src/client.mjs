@@ -422,7 +422,12 @@ export function mountQuotaCard({
     surface.hidden = dataHidden
     floatHost.hidden = dataHidden
   }
-  doc.documentElement.append(floatHost)
+  // Mount under <body>, NOT <html>: the DSH theme tokens (--dsw-alias-*) are
+  // defined on <body>, and a sibling of <body> never inherits them — mounting
+  // on documentElement silently stranded the float shell on hardcoded dark
+  // fallbacks (broke the light theme). <body> is also transform-free, so
+  // position:fixed stays viewport-anchored.
+  doc.body.append(floatHost)
   const applyFloatGeometry = () => {
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768

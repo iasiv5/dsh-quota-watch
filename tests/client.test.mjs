@@ -326,12 +326,12 @@ test('panel header close button closes the panel', async () => {
 const floatSurface = (window) =>
   window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
 
-test('float shell mounts the capsule on documentElement', async () => {
+test('float shell mounts the capsule under <body> for theme-token inheritance', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  assert.ok(host, 'float host is appended to documentElement')
-  assert.equal(host.parentElement, window.document.documentElement)
+  assert.ok(host, 'float host is appended to body')
+  assert.equal(host.parentElement, window.document.body, 'direct child of <body> (inherits body-level theme tokens)')
   const capsule = host.shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
   assert.ok(capsule, 'capsule is the only floating surface')
   assert.equal(host.shadowRoot.querySelector('[data-dsh-quota-watch-ball]'), null, 'the round ball is retired')
