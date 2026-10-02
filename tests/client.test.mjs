@@ -889,6 +889,28 @@ test('float style text carries the drag and touch affordances', async () => {
   assert.match(css, /-webkit-tap-highlight-color:\s*transparent/)
   assert.match(css, /-webkit-touch-callout:\s*none/)
   assert.match(css, /\.dqw-capsule::before[^}]*inset:\s*-9px/, 'hit area padded to 44px around the 26px pill')
+  assert.match(css, /\.dqw-panel--sheet/, 'narrow viewports dock the panel to the bottom')
+  assert.match(css, /safe-area-inset-bottom/)
+  assert.match(css, /100dvh/)
+  dispose()
+  window.close()
+})
+
+test('narrow viewports get the bottom-sheet panel', async () => {
+  const window = dom()
+  window.innerWidth = 400
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.classList.contains('dqw-panel--sheet'), true, '≤480px engages the sheet')
+  assert.equal(panel.style.left, '', 'inline anchor positioning is dropped in sheet mode')
+  window.innerWidth = 800
+  window.dispatchEvent(new window.Event('resize'))
+  await turn()
+  assert.equal(panel.classList.contains('dqw-panel--sheet'), false, 'widening restores the anchored panel')
+  assert.notEqual(panel.style.left, '')
   dispose()
   window.close()
 })

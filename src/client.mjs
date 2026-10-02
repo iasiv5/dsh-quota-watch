@@ -142,6 +142,7 @@ const FLOAT_STYLE_TEXT = `
 .dqw-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
 .dqw-panel { position: fixed; z-index: 2147483000; min-width: 166px; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
+.dqw-panel--sheet { left:8px; right:8px; top:auto; bottom:calc(8px + env(safe-area-inset-bottom, 0px)); width:auto; max-width:none; max-height:calc(100dvh - 24px); }
 .dqw-panel[hidden] { display: none; }
 .dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
 .dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -862,6 +863,16 @@ export function mountQuotaCard({
     if (panel.hidden) return
     const anchor = lastAnchor?.()
     if (!anchor || !anchor.isConnected) return
+    if ((win.innerWidth ?? 1024) <= 480) {
+      // Narrow viewport (phones): dock the panel to the bottom instead of
+      // squeezing it beside the capsule — the sheet is CSS-positioned, so the
+      // inline anchor coordinates are dropped.
+      panel.classList.add('dqw-panel--sheet')
+      panel.style.left = ''
+      panel.style.top = ''
+      return
+    }
+    panel.classList.remove('dqw-panel--sheet')
     const rect = anchor.getBoundingClientRect()
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
