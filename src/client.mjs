@@ -155,7 +155,7 @@ const FLOAT_STYLE_TEXT = `
 .dqw-label { font-size: 11px; font-weight: 600; width: 52px; flex: none; }
 .dqw-label[data-action="refresh"] { cursor: pointer; border-radius: 4px; }
 .dqw-label[data-action="refresh"]:hover { opacity: .75; }
-.dqw-bar { display: block; flex: 1; height: 4px; overflow: hidden; border-radius: 4px; background: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); }
+.dqw-bar { display: block; flex: 0 0 auto; width: 100px; height: 4px; overflow: hidden; border-radius: 4px; background: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); }
 .dqw-bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--dsw-alias-button-primary-fill, #5b8def); }
 .dqw-bar-fill.warn { background: var(--dsw-alias-label-warning, #d29922); }
 .dqw-bar-fill.danger { background: var(--dsw-alias-label-danger, #c93c3c); }
