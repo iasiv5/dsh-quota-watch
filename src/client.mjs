@@ -138,8 +138,8 @@ const FLOAT_STYLE_TEXT = `
 @media print { :host { display: none !important; } }
 @keyframes dqw-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
 .dqw-panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.dqw-panel-action { min-width: 0; margin: 0; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); font: inherit; font-size: 11px; line-height: 16px; text-align: center; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dqw-panel-action:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-panel-action { min-width: 0; margin: 0; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); font: inherit; font-size: 10px; line-height: 14px; opacity: .72; text-align: center; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dqw-panel-action:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); opacity: 1; }
 .dqw-panel { position: fixed; z-index: 2147483000; min-width: 166px; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
 .dqw-panel--sheet { left:8px; right:8px; top:auto; bottom:calc(8px + env(safe-area-inset-bottom, 0px)); width:auto; max-width:none; max-height:calc(100dvh - 24px); }
@@ -192,7 +192,13 @@ const FLOAT_STYLE_TEXT = `
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
 `
 
+/** Locale resolution follows the host, not just the browser: the DSH locale
+ * feature mirrors its resolved preference (设置 → 语言) onto
+ * `<html lang>` and keeps it updated on every switch, so prefer that signal
+ * and fall back to navigator.language when the host has not synced yet. */
 function localeFor(win) {
+  const host = String(win?.document?.documentElement?.lang ?? '').trim()
+  if (host !== '') return host.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   return String(win?.navigator?.language ?? 'zh').toLowerCase().startsWith('zh') ? 'zh' : 'en'
 }
 
@@ -361,8 +367,11 @@ export function mountQuotaCard({
   if (!doc?.body || typeof fetchImpl !== 'function') return () => {}
   if (doc.querySelector(CARD_SELECTOR) || doc.querySelector(FLOAT_SELECTOR)) return () => {}
 
-  const locale = localeFor(win)
-  const copy = COPY[locale]
+  // Mutable so a host language switch (设置 → 语言 → <html lang>) re-renders
+  // every surface with the new dictionary on the next pass — renderAll is the
+  // one funnel all render paths share.
+  let locale = localeFor(win)
+  let copy = COPY[locale]
   const container = doc.createElement('div')
   container.dataset.dshQuotaWatchCard = ''
   container.dataset.dshPlugin = 'quota-watch'
@@ -990,6 +999,8 @@ export function mountQuotaCard({
     ? new win.ResizeObserver(() => { syncCardVisibility() })
     : null
   const renderAll = () => {
+    locale = localeFor(win)
+    copy = COPY[locale]
     const providers = snapshot?.providers ?? []
     const glm = providers.find((provider) => provider?.key === 'glm')
     const copilot = providers.find((provider) => provider?.key === 'copilot')
@@ -1063,6 +1074,13 @@ export function mountQuotaCard({
     schedulePlace()
   })
   observer.observe(doc.body, { childList: true, subtree: true })
+  // The DSH locale feature mirrors every language switch onto <html lang>;
+  // re-render on that flip so the UI follows 设置 → 语言 without a reload.
+  // A no-op flip (same value) never fires, so this costs nothing at rest.
+  const langObserver = typeof win.MutationObserver === 'function'
+    ? new win.MutationObserver(() => { if (!disposed) renderAll() })
+    : null
+  langObserver?.observe(doc.documentElement, { attributeFilter: ['lang'] })
   place()
 
   const startPolling = () => {
@@ -1121,6 +1139,9 @@ export function mountQuotaCard({
       syncPop()
     }
   }
+  // Both handlers ride the card's inner body element — INSIDE the card shadow
+  // root — so shadow-host retargeting never applies and event.target is the
+  // real row/label in every browser.
   const onBodyClick = (event) => {
     if (event.target?.closest?.('[data-action="refresh"]')) {
       void poll(true)
@@ -1195,6 +1216,7 @@ export function mountQuotaCard({
     disposed = true
     stopPolling()
     observer.disconnect()
+    langObserver?.disconnect()
     doc.removeEventListener('visibilitychange', onVisibilityChange)
     doc.removeEventListener('pointerdown', onDocPointerDown, true)
     doc.removeEventListener('scroll', onDocScroll, true)

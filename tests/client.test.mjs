@@ -970,6 +970,33 @@ test('footless profiles render only the refresh action in the footer', async () 
   window.close()
 })
 
+test('switching the host language re-renders the UI without a reload', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(root.querySelector('[data-action="panel-refresh"]').textContent, '立即刷新', 'mounted with the zh dictionary')
+  // The DSH locale feature mirrors its resolved preference onto <html lang>;
+  // the langObserver must pick the flip up and re-render with the new copy.
+  window.document.documentElement.lang = 'en-US'
+  await turn()
+  assert.equal(root.querySelector('[data-action="panel-refresh"]').textContent, 'Refresh now', 'the en dictionary applies without a reload')
+  dispose()
+  window.close()
+})
+
+test('0.1.14 regression guards: footer buttons match the muted extra style', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const floatStyle = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('style').textContent
+  assert.match(floatStyle, /\.dqw-panel-actions \{ display: grid; grid-template-columns: 1fr 1fr;/, 'footer buttons stay equal-width regardless of label length')
+  assert.match(floatStyle, /\.dqw-panel-action \{[^}]*font-size: 10px; line-height: 14px; opacity: \.72/, 'button text rests at the same size and opacity as .dqw-extra')
+  assert.match(floatStyle, /\.dqw-panel-action:hover \{[^}]*opacity: 1/, 'hover restores full strength')
+  dispose()
+  window.close()
+})
+
 test('clicking the provider label re-probes without toggling the row', async () => {
   const window = dom()
   const { dispose, requests } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
