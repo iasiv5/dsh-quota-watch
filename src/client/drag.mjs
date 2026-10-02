@@ -6,7 +6,6 @@ import { clampPoint } from './prefs.mjs'
 
 export const DRAG_SLOP_MOUSE = 6
 export const DRAG_SLOP_TOUCH = 10
-export const LONG_PRESS_MS = 500
 
 /** Touch/pen gestures get the larger slop so taps win over drags. */
 export function dragSlop(pointerType) {

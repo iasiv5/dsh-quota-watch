@@ -34,16 +34,16 @@ _Avoid_: Calling it a quota; session usage; treating the interval as a rolling w
 ### UI surfaces
 
 **Capsule**:
-The persistent, draggable floating pill — the plugin's only guaranteed surface — that renders each provider's used percentage in one line. It mounts at the top level of the page (never inside host-managed containers), carries the context menu, and is the panel's primary entry point.
-_Avoid_: floating ball, ball, floating window, FAB, widget, mini mode
+The persistent, draggable floating pill — the plugin's only guaranteed surface — that renders each provider's used percentage in one line. It mounts at the top level of the page (never inside host-managed containers), opens the panel on click, and is the plugin's primary entry point; it has no context menu (its actions live in the panel footer).
+_Avoid_: floating ball, ball, floating window, FAB, widget, mini mode, context menu
 
 **Free-floating position memory**:
 The capsule's position persistence behavior where user-placed coordinates {x, y} are remembered across sessions, with the element's measured geometry kept clamped inside viewport boundaries and safe-area margins.
 _Avoid_: edge docking (retired), magnetic snap, peek, unconstrained coordinates
 
 **Panel**:
-The floating detail surface opened from the capsule or a card row; it renders the quota overview and per-provider detail views.
-_Avoid_: popup, pop (implementation class name only), modal
+The floating detail surface opened from the capsule or a card row; it renders the quota overview and per-provider detail views, with a footer grid of two equal-width buttons — the sidebar-card toggle and a manual refresh — that replaced the retired capsule context menu.
+_Avoid_: popup, pop (implementation class name only), modal, context menu
 
 **Sidebar card (card)**:
 The opportunistic entry rendered in the DSH web sidebar footer when that mount point exists; it is silently absent when the point does not (collapsed sidebar, desktop profile).

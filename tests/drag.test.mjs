@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import {
   DRAG_SLOP_MOUSE,
   DRAG_SLOP_TOUCH,
-  LONG_PRESS_MS,
   clampFrame,
   dragSlop,
   grabOffset,
@@ -15,7 +14,6 @@ const ZERO_INSETS = { left: 0, right: 0, top: 0, bottom: 0 }
 test('drag constants follow the platform conventions', () => {
   assert.equal(DRAG_SLOP_MOUSE, 6)
   assert.equal(DRAG_SLOP_TOUCH, 10)
-  assert.equal(LONG_PRESS_MS, 500)
 })
 
 test('dragSlop grades by pointer type with a mouse default', () => {

@@ -1,7 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
 import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags } from './client/prefs.mjs'
-import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, LONG_PRESS_MS, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
+import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -23,7 +23,7 @@ const COPY = {
     title: 'Token额度',
     openDetails: '查看详情',
     close: '关闭',
-    menu: {
+    actions: {
       showCard: '显示侧边栏卡片',
       hideCard: '隐藏侧边栏卡片',
       refreshNow: '立即刷新',
@@ -56,7 +56,7 @@ const COPY = {
     title: 'Quota Watch',
     openDetails: 'View details',
     close: 'Close',
-    menu: {
+    actions: {
       showCard: 'Show sidebar card',
       hideCard: 'Hide sidebar card',
       refreshNow: 'Refresh now',
@@ -137,10 +137,9 @@ const FLOAT_STYLE_TEXT = `
 }
 @media print { :host { display: none !important; } }
 @keyframes dqw-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
-.dqw-menu { position: fixed; min-width: 150px; padding: 4px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 88%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); font: inherit; display: flex; flex-direction: column; }
-.dqw-menu[hidden] { display: none; }
-.dqw-menu-item { display: flex; align-items: center; gap: 6px; margin: 0; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; font-size: 11px; line-height: 16px; text-align: left; cursor: pointer; }
-.dqw-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); }
+.dqw-panel-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dqw-panel-action { min-width: 0; margin: 0; padding: 6px 8px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 8px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); font: inherit; font-size: 11px; line-height: 16px; text-align: center; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dqw-panel-action:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-panel { position: fixed; z-index: 2147483000; min-width: 166px; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
 .dqw-panel--sheet { left:8px; right:8px; top:auto; bottom:calc(8px + env(safe-area-inset-bottom, 0px)); width:auto; max-width:none; max-height:calc(100dvh - 24px); }
@@ -269,17 +268,6 @@ function quotaIcon(doc) {
   hub.setAttribute('stroke', 'none')
   svg.append(dial, ticks, needle, hub)
   return svg
-}
-
-/** One right-click menu row. */
-function menuItem(doc, action, label) {
-  const item = doc.createElement('button')
-  item.type = 'button'
-  item.className = 'dqw-menu-item'
-  item.setAttribute('role', 'menuitem')
-  item.dataset.menu = action
-  item.append(text(doc, 'span', '', label))
-  return item
 }
 
 /** Double-chevron icon for the panel's back affordance. */
@@ -480,12 +468,6 @@ export function mountQuotaCard({
   applyPosition()
   // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
   floatRoot.append(panel)
-  const menu = doc.createElement('div')
-  menu.className = 'dqw-menu'
-  menu.dataset.dshQuotaWatchMenu = ''
-  menu.setAttribute('role', 'menu')
-  menu.hidden = true
-  floatRoot.append(menu)
 
   let suppressNextClick = false
   /** One rAF (or a synchronous fallback when the host has none) — drag frames
@@ -511,13 +493,6 @@ export function mountQuotaCard({
     let restX = 0
     let restY = 0
     let lastPoint = null
-    let longPressTimer
-    const clearLongPress = () => {
-      if (longPressTimer !== undefined) {
-        win.clearTimeout(longPressTimer)
-        longPressTimer = undefined
-      }
-    }
     /** Doc-level move/up/cancel are bound only while a gesture is active —
      * the pill's resting state costs zero document-level listeners. */
     const bindGesture = () => {
@@ -538,18 +513,6 @@ export function mountQuotaCard({
       originY = event.clientY
       // Graded slop: touch/pen get 10px so taps win over drags (Task 6).
       slop = dragSlop(event.pointerType)
-      // Long press opens the context menu on touch (iOS has no contextmenu);
-      // movement past the slop cancels it in favor of the drag.
-      clearLongPress()
-      if (slop === DRAG_SLOP_TOUCH) {
-        longPressTimer = win.setTimeout(() => {
-          longPressTimer = undefined
-          if (!dragging || moved) return
-          try { win.navigator.vibrate?.(10) } catch { /* vibration unavailable */ }
-          openMenu()
-          suppressNextClick = true
-        }, LONG_PRESS_MS)
-      }
       const rect = surfaceEl.getBoundingClientRect()
       grab = grabOffset({ x: event.clientX, y: event.clientY }, rect)
       dragSize = rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
@@ -563,7 +526,6 @@ export function mountQuotaCard({
       if (!moved) {
         if (Math.hypot(event.clientX - originX, event.clientY - originY) < slop) return
         moved = true
-        clearLongPress()
         doc.body.style.userSelect = 'none'
         surfaceEl.classList.add('dqw-capsule--dragging')
       }
@@ -591,7 +553,6 @@ export function mountQuotaCard({
     const onPointerUp = (event) => {
       if (!dragging) return
       dragging = false
-      clearLongPress()
       unbindGesture()
       doc.body.style.userSelect = ''
       if (!moved) return
@@ -614,7 +575,6 @@ export function mountQuotaCard({
     const onPointerCancel = () => {
       if (!dragging) return
       dragging = false
-      clearLongPress()
       unbindGesture()
       doc.body.style.userSelect = ''
       surfaceEl.classList.remove('dqw-capsule--dragging')
@@ -719,6 +679,34 @@ export function mountQuotaCard({
     return header
   }
 
+  /** Panel footer: the card toggle and a manual refresh sit side by side in an
+   * equal-width grid (perceived width is the box, not the glyph count, so the
+   * 1fr/1fr columns also survive label flips and other locales). This replaces
+   * the retired capsule context menu: one click surface, no hidden gestures,
+   * and it renders even in the loading/error empty state. */
+  const overviewActions = () => {
+    const actions = doc.createElement('div')
+    actions.className = 'dqw-panel-actions'
+    if (hasCardMount()) {
+      const toggle = doc.createElement('button')
+      toggle.type = 'button'
+      toggle.className = 'dqw-panel-action'
+      toggle.dataset.action = 'toggle-card'
+      const toggleLabel = surfaceFlags.cardHidden ? copy.actions.showCard : copy.actions.hideCard
+      toggle.textContent = toggleLabel
+      toggle.setAttribute('aria-label', toggleLabel)
+      actions.append(toggle)
+    }
+    const refresh = doc.createElement('button')
+    refresh.type = 'button'
+    refresh.className = 'dqw-panel-action'
+    refresh.dataset.action = 'panel-refresh'
+    refresh.textContent = copy.actions.refreshNow
+    refresh.setAttribute('aria-label', copy.actions.refreshNow)
+    actions.append(refresh)
+    return actions
+  }
+
   const renderOverview = () => {
     panel.replaceChildren(panelHeader({ title: copy.title }))
     const providers = snapshot?.providers ?? []
@@ -733,16 +721,17 @@ export function mountQuotaCard({
     ].filter(Boolean).flat()
     if (rows.length === 0) {
       panel.append(text(doc, 'p', 'dqw-muted', lastUpdated.textContent || copy.loading))
-      return
+    } else {
+      const list = doc.createElement('div')
+      list.className = 'dqw-overview-list'
+      list.append(...rows)
+      // Tag the reused rows for the panel's own click/keyboard routing.
+      for (const row of list.querySelectorAll('[data-dsh-quota-watch-row]')) {
+        row.dataset.dshQuotaWatchPanelProvider = row.dataset.dshQuotaWatchRow
+      }
+      panel.append(list)
     }
-    const list = doc.createElement('div')
-    list.className = 'dqw-overview-list'
-    list.append(...rows)
-    // Tag the reused rows for the panel's own click/keyboard routing.
-    for (const row of list.querySelectorAll('[data-dsh-quota-watch-row]')) {
-      row.dataset.dshQuotaWatchPanelProvider = row.dataset.dshQuotaWatchRow
-    }
-    panel.append(list)
+    panel.append(overviewActions())
   }
 
   function renderDetail(detail, key, provider, fromPanelNav = false) {
@@ -973,44 +962,6 @@ export function mountQuotaCard({
     onSurfaceClick()
   }
   const hasCardMount = () => Boolean(footArea(doc))
-  const openMenu = () => {
-    const items = []
-    if (hasCardMount()) {
-      items.push(menuItem(doc, 'toggle-card', surfaceFlags.cardHidden ? copy.menu.showCard : copy.menu.hideCard))
-    }
-    items.push(menuItem(doc, 'refresh', copy.menu.refreshNow))
-    menu.replaceChildren(...items)
-    menu.hidden = false
-    const rect = surface.getBoundingClientRect()
-    const viewWidth = win.innerWidth ?? 1024
-    const viewHeight = win.innerHeight ?? 768
-    const width = menu.offsetWidth || 150
-    const height = menu.offsetHeight || 120
-    let left = rect.right + 8
-    if (left + width > viewWidth - 8) left = Math.max(8, rect.left - width - 8)
-    const top = Math.min(Math.max(rect.top, 8), Math.max(8, viewHeight - height - 8))
-    menu.style.left = `${Math.round(left)}px`
-    menu.style.top = `${Math.round(top)}px`
-  }
-  const onSurfaceContext = (event) => {
-    event.preventDefault()
-    // Android fires the native contextmenu right after the long-press timer:
-    // an already-open menu is kept as-is instead of being rebuilt.
-    if (!menu.hidden) return
-    openMenu()
-  }
-  const onMenuClick = (event) => {
-    const item = event.target?.closest?.('[data-menu]')
-    if (!item) return
-    const action = item.dataset.menu
-    if (action === 'toggle-card') {
-      setCardHidden(!surfaceFlags.cardHidden)
-    } else if (action === 'refresh') {
-      void poll(true)
-    }
-    menu.hidden = true
-  }
-  menu.addEventListener('click', onMenuClick)
 
   // Cross-profile narrow-container detection: a measurably narrow foot would
   // clip the card into unreadable text regardless of HOW the host signals its
@@ -1140,6 +1091,19 @@ export function mountQuotaCard({
     syncPop()
   }
   const onPanelClick = (event) => {
+    // Panel-scoped actions (the retired context menu now lives here): buttons
+    // sit inside this shadow tree, so a panel-level listener sees the real
+    // target with no retargeting ambiguity.
+    if (event.target?.closest?.('[data-action="panel-refresh"]')) {
+      void poll(true)
+      return
+    }
+    if (event.target?.closest?.('[data-action="toggle-card"]')) {
+      // renderAll → syncPop → renderOverview re-renders the footer, so the
+      // label flips in place while the panel stays open.
+      setCardHidden(!surfaceFlags.cardHidden)
+      return
+    }
     if (event.target?.closest?.('[data-action="panel-close"]')) {
       openKey = undefined
       syncPop()
@@ -1176,9 +1140,9 @@ export function mountQuotaCard({
   const onDocPointerDown = (event) => {
     if (openKey === undefined) return
     const path = typeof event.composedPath === 'function' ? event.composedPath() : []
-    if (path.includes(panel) || path.includes(menu) || path.includes(container)) return
+    if (path.includes(panel) || path.includes(container)) return
     const target = event.target
-    if (target === panel || target === menu || target === container) return
+    if (target === panel || target === container) return
     if (target?.getRootNode?.() === cardRoot || target?.getRootNode?.() === floatRoot) return
     openKey = undefined
     renderAll()
@@ -1200,10 +1164,6 @@ export function mountQuotaCard({
   }
   const onDocKeydown = (event) => {
     if (event.key !== 'Escape') return
-    if (!menu.hidden) {
-      menu.hidden = true
-      return
-    }
     if (openKey !== undefined) {
       openKey = undefined
       renderAll()
@@ -1223,7 +1183,6 @@ export function mountQuotaCard({
   })
   surface.addEventListener('click', onSurfaceClick)
   surface.addEventListener('keydown', onSurfaceKeydown)
-  surface.addEventListener('contextmenu', onSurfaceContext)
   let disposeDrag = attachDrag(surface)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
@@ -1246,8 +1205,6 @@ export function mountQuotaCard({
     panel.removeEventListener('click', onPanelClick)
     surface.removeEventListener('click', onSurfaceClick)
     surface.removeEventListener('keydown', onSurfaceKeydown)
-    surface.removeEventListener('contextmenu', onSurfaceContext)
-    menu.removeEventListener('click', onMenuClick)
     disposeDrag()
     // A dispose landing mid-gesture must not leave the body unselectable.
     doc.body.style.userSelect = ''

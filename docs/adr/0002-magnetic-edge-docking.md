@@ -10,6 +10,7 @@ The capsule's rest position was stored as free `{x, y}` coordinates validated ag
 - **Docking is left/right only, fully visible** with the clamp margin (8px). The capsule is an information surface; chat-heads-style half-hidden "peek" docking hides the data it exists to show.
 - **Drag pipeline**: preserve the grab offset, apply movement via `transform` during the gesture (rAF-batched, live-clamped with the measured rect), and commit `left/top` + persist the dock only on release. Snap-to-edge plays a short transform transition, suppressed under `prefers-reduced-motion`.
 - **Touch protocol**: `touch-action: none` on the pill; `pointercancel` aborts the drag cleanly; drag slop is graded (6px mouse, 10px touch); a 500ms long-press opens the context menu (compensating for iOS's missing `contextmenu`); the hit area is padded to ≥44px while the visual pill stays 26px.
+  - _2026-10-03 update (0.1.14): the long-press context menu is retired — the sidebar-card toggle and manual refresh moved into the panel footer, so a single click surface covers every platform and the long-press machinery is removed._
 
 ## Considered options
 

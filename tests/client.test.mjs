@@ -741,85 +741,39 @@ test('pointercancel aborts the drag cleanly without persisting', async () => {
   window.close()
 })
 
-test('a long touch press opens the context menu and suppresses the trailing click', async () => {
+test('a long touch press opens nothing — the actions live in the panel footer', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   const capsule = floatSurface(window)
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  const menu = host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]')
   const down = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 })
   Object.defineProperty(down, 'pointerType', { value: 'touch' })
   capsule.dispatchEvent(down)
   await new Promise((resolve) => setTimeout(resolve, 520))
-  assert.equal(menu.hidden, false, '500ms long press opens the menu (iOS parity for contextmenu)')
+  assert.equal(host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]'), null, 'the context menu machinery is gone')
+  assert.equal(panel.hidden, true, 'a held touch opens nothing by itself')
   window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500, button: 0 }))
   capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
-  assert.equal(panel.hidden, true, 'the trailing click after a long press is suppressed')
+  assert.equal(panel.hidden, false, 'the trailing click still opens the panel')
   dispose()
   window.close()
 })
 
-test('long-press edges: quick tap, movement cancel and mouse stay untouched', async () => {
+test('contextmenu on the capsule is left to the browser — no menu machinery', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  const capsule = floatSurface(window)
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  const menu = host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]')
-
-  // Quick tap: up well inside 500ms → click still opens the panel.
-  const tapDown = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 })
-  Object.defineProperty(tapDown, 'pointerType', { value: 'touch' })
-  capsule.dispatchEvent(tapDown)
-  await new Promise((resolve) => setTimeout(resolve, 50))
-  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500, button: 0 }))
-  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  assert.equal(panel.hidden, false, 'a quick tap keeps the click behavior')
-  assert.equal(menu.hidden, true, 'a quick tap does not open the menu')
-  window.document.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
-  await turn()
-
-  // Movement past the slop cancels the pending long press.
-  const dragDown = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 })
-  Object.defineProperty(dragDown, 'pointerType', { value: 'touch' })
-  capsule.dispatchEvent(dragDown)
-  const dragMove = new window.MouseEvent('pointermove', { bubbles: true, clientX: 560, clientY: 520 })
-  Object.defineProperty(dragMove, 'pointerType', { value: 'touch' })
-  window.document.dispatchEvent(dragMove)
-  await new Promise((resolve) => setTimeout(resolve, 520))
-  assert.equal(menu.hidden, true, 'movement past the slop cancels the long press')
-  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 560, clientY: 520, button: 0 }))
-  await turn()
-
-  // Mouse long press does nothing (desktop has the real contextmenu).
-  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
-  await new Promise((resolve) => setTimeout(resolve, 520))
-  assert.equal(menu.hidden, true, 'mouse presses never trigger the long-press menu')
-  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500, button: 0 }))
-  dispose()
-  window.close()
-})
-
-test('repeat contextmenu on an open menu is a no-op', async () => {
-  const window = dom()
-  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
-  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
   const capsule = floatSurface(window)
-  const menu = host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]')
-  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true }))
+  // Twice, like Android firing the native contextmenu after its long-press
+  // timer: nothing must appear and nothing must throw.
+  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
   await turn()
-  assert.equal(menu.hidden, false)
-  const first = menu.children[0]
-  // Android fires the native contextmenu after the long-press timer — the
-  // guard must keep the already-open menu untouched (identity, not structure:
-  // a rebuilt menu is structurally identical).
-  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true }))
-  await turn()
-  assert.equal(menu.hidden, false)
-  assert.ok(menu.children[0] === first, 'menu children are not rebuilt')
+  assert.equal(host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]'), null, 'no menu element exists at all')
+  assert.equal(panel.hidden, true)
   dispose()
   window.close()
 })
@@ -930,48 +884,47 @@ test('capsule percent spans switch color classes past thresholds', async () => {
   window.close()
 })
 
-test('context menu exposes the actions', async () => {
-  const window = dom()
+test('the panel overview footer exposes the actions', async () => {
+  const window = dom({ locale: 'zh-CN' })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
-  const menu = root.querySelector('[data-dsh-quota-watch-menu]')
-  assert.ok(menu, 'menu element lives in the float shadow root')
-  assert.equal(menu.hidden, true)
-  floatSurface(window).dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
-  assert.equal(menu.hidden, false)
-  const items = [...menu.querySelectorAll('[data-menu]')].map((item) => item.dataset.menu)
-  assert.deepEqual(items, ['toggle-card', 'refresh'])
+  const actions = root.querySelector('.dqw-panel-actions')
+  assert.ok(actions, 'the footer grid lives in the float shadow root next to the panel')
+  const buttons = [...actions.querySelectorAll('button')].map((button) => button.dataset.action)
+  assert.deepEqual(buttons, ['toggle-card', 'panel-refresh'])
+  assert.equal(actions.querySelector('[data-action="toggle-card"]').textContent, '显示侧边栏卡片', 'the card is opt-in, so the footer offers to reveal it')
+  assert.equal(actions.querySelector('[data-action="panel-refresh"]').textContent, '立即刷新')
   dispose()
   window.close()
 })
 
-test('menu actions persist flags and refresh', async () => {
+test('panel footer actions persist flags and refresh', async () => {
   const window = dom()
   const { dispose, requests } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
-  const menu = root.querySelector('[data-dsh-quota-watch-menu]')
-  const surfaceEl = () => root.querySelector('[data-dsh-quota-watch-capsule]')
-  const openMenu = async () => {
-    surfaceEl().dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-    await turn()
-  }
-  const clickItem = async (action) => {
-    await openMenu()
-    menu.querySelector(`[data-menu="${action}"]`).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  const panel = root.querySelector('[data-dsh-quota-watch-panel]')
+  assert.equal(panel.hidden, false)
+  const clickAction = async (action) => {
+    panel.querySelector(`[data-action="${action}"]`).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
     await turn()
   }
   // toggle-card: the card is opt-in — first click reveals it, second hides it
   assert.equal(container.hidden, true, 'card is opt-in and hidden by default')
-  await clickItem('toggle-card')
+  await clickAction('toggle-card')
   assert.deepEqual(JSON.parse(window.localStorage.getItem(SURFACE_FLAGS_KEY)), { cardHidden: false })
   assert.equal(container.hidden, false)
-  await clickItem('toggle-card')
+  assert.equal(panel.hidden, false, 'the panel stays open across the toggle')
+  assert.ok(panel.querySelector('[data-action="toggle-card"]'), 'the toggle re-renders inside the still-open panel')
+  await clickAction('toggle-card')
   assert.deepEqual(JSON.parse(window.localStorage.getItem(SURFACE_FLAGS_KEY)), { cardHidden: true })
   assert.equal(container.hidden, true)
   // refresh: host probe POST
-  await clickItem('refresh')
+  await clickAction('panel-refresh')
   assert.deepEqual(requests.at(-1), { path: 'api/dsh-quota-watch/refresh', method: 'POST' })
   dispose()
   window.close()
@@ -987,38 +940,32 @@ test('card hidden flag persists across remounts', async () => {
   window.close()
 })
 
-test('escape closes the menu first and the panel second', async () => {
+test('escape closes the panel directly', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
   const capsule = root.querySelector('[data-dsh-quota-watch-capsule]')
-  const menu = root.querySelector('[data-dsh-quota-watch-menu]')
   const panel = root.querySelector('[data-dsh-quota-watch-panel]')
   capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
-  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
-  await turn()
-  assert.equal(menu.hidden, false)
   assert.equal(panel.hidden, false)
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
   await turn()
-  assert.equal(menu.hidden, true, 'first escape closes the menu')
-  assert.equal(panel.hidden, false, 'panel survives the first escape')
-  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-  await turn()
-  assert.equal(panel.hidden, true, 'second escape closes the panel')
+  assert.equal(panel.hidden, true, 'escape closes the panel')
   dispose()
   window.close()
 })
 
-test('footless profiles hide the toggle-card menu item', async () => {
+test('footless profiles render only the refresh action in the footer', async () => {
   const window = dom({ footless: true })
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const root = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot
-  floatSurface(window).dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
-  const items = [...root.querySelectorAll('[data-menu]')].map((item) => item.dataset.menu)
-  assert.deepEqual(items, ['refresh'])
+  const actions = root.querySelector('.dqw-panel-actions')
+  assert.ok(actions, 'the footer renders even without a sidebar mount point')
+  const buttons = [...actions.querySelectorAll('button')].map((button) => button.dataset.action)
+  assert.deepEqual(buttons, ['panel-refresh'])
   dispose()
   window.close()
 })
