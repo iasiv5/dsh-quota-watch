@@ -31,6 +31,20 @@ export function clampPoint(point, viewport, size = 0, insets = ZERO_INSETS) {
   }
 }
 
+// Windows Desktop shell titlebar contract (0.1.20): the shell runs
+// `titleBarStyle:hidden + titleBarOverlay`, so the top strip of the window is a
+// full-width `-webkit-app-region:drag` band that swallows pointer input by
+// LAYOUT — z-index and paint order are irrelevant — and a capsule parked inside
+// it can never be grabbed or clicked again. The shell flags the band on
+// <html> with `data-windows-titlebar` + `--dsh-windows-titlebar-height` and
+// clears it under `data-fullscreen`; its own floats clamp to exactly this
+// value. Everything else (DSH Web, browsers, jsdom) yields 0 — zero drift.
+export function titlebarTopInset({ titlebar = false, fullscreen = false, height } = {}) {
+  if (!titlebar || fullscreen) return 0
+  const value = Number.parseFloat(height)
+  return Number.isFinite(value) && value > 0 ? value : 0
+}
+
 export function loadFloatPosition(storage) {
   try {
     const raw = storage.getItem(FLOAT_POSITION_KEY)

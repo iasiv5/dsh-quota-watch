@@ -1,6 +1,6 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags } from './client/prefs.mjs'
+import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags, titlebarTopInset } from './client/prefs.mjs'
 import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
@@ -450,7 +450,8 @@ export function mountQuotaCard({
     const rect = surface.getBoundingClientRect()
     return rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
   }
-  /** Position = user preferred {x, y} clamped to viewport & safe-area insets. */
+  /** Position = user preferred {x, y} clamped to viewport, safe-area insets
+   * and the Windows shell titlebar band. */
   const applyPosition = () => {
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
@@ -471,13 +472,37 @@ export function mountQuotaCard({
   const safeAreaProbe = text(doc, 'div', '', '')
   safeAreaProbe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);'
   floatRoot.append(safeAreaProbe)
+  // Windows Desktop titlebar band (0.1.20): with `titleBarStyle:hidden +
+  // titleBarOverlay` the top strip of the window is the shell's full-width
+  // `-webkit-app-region:drag` band — it wins pointer input by layout, ignoring
+  // z-index, so a capsule dropped there is stuck for good (un-grabbable,
+  // un-clickable, and the persisted position kept re-parking it). Folding the
+  // band into the top inset routes it through every clamp path at once: live
+  // drag frames, release docking, persisted-position restore and the default
+  // dock — and mount-time clamping also self-heals positions saved by 0.1.19.
+  // Same contract the shell's own floats consume: `data-windows-titlebar` +
+  // `--dsh-windows-titlebar-height` on <html>, dropped under `data-fullscreen`.
+  // DSH Web / browsers have neither attribute nor variable → 0, zero drift.
+  const readTitlebarInset = () => {
+    try {
+      const html = doc.documentElement
+      return titlebarTopInset({
+        titlebar: html.hasAttribute('data-windows-titlebar'),
+        fullscreen: html.hasAttribute('data-fullscreen'),
+        height: parseInset(win.getComputedStyle(html)?.getPropertyValue('--dsh-windows-titlebar-height')),
+      })
+    } catch {
+      return 0
+    }
+  }
   /** Live env(safe-area-inset-*) reading — re-probed on every use, so window
-   * chrome changes (rotation, URL-bar collapse) need no explicit invalidation. */
+   * chrome changes (rotation, URL-bar collapse) need no explicit invalidation.
+   * `top` is the larger of the safe-area inset and the shell titlebar band. */
   const readInsets = () => {
     try {
       const style = win.getComputedStyle(safeAreaProbe)
       return {
-        top: parseInset(style?.paddingTop),
+        top: Math.max(parseInset(style?.paddingTop), readTitlebarInset()),
         right: parseInset(style?.paddingRight),
         bottom: parseInset(style?.paddingBottom),
         left: parseInset(style?.paddingLeft),
@@ -892,7 +917,11 @@ export function mountQuotaCard({
     if (left + width > viewWidth - 8) left = rect.left - width - 8
     if (left + width > viewWidth - 8) left = viewWidth - width - 8
     left = Math.max(8, left)
-    const top = Math.min(Math.max(rect.top, 8), Math.max(8, viewHeight - height - 8))
+    // The panel header carries the close button: keep its top edge below the
+    // shell titlebar band (and safe-area top) for the same reason as the
+    // capsule — layout-level drag hits ignore z-index. Web fallback: 8px, as before.
+    const minTop = MARGIN + readInsets().top
+    const top = Math.min(Math.max(rect.top, minTop), Math.max(minTop, viewHeight - height - 8))
     panel.style.left = `${Math.round(left)}px`
     panel.style.top = `${Math.round(top)}px`
   }

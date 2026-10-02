@@ -793,6 +793,98 @@ test('safe-area insets shift the default capsule position away from the notch', 
   window.close()
 })
 
+// --- Windows Desktop titlebar band (0.1.20, same contract as dsh-m 0.9.4) ---
+// The desktop shell draws its caption (— □ ✕) over a full-width
+// -webkit-app-region:drag strip at the top of the window; hits are decided by
+// layout, so a capsule dropped there stops receiving pointer events entirely —
+// it can neither be grabbed nor clicked, and its persisted position kept
+// re-parking it on every boot. The shell exposes the band as
+// data-windows-titlebar + --dsh-windows-titlebar-height on <html>.
+
+test('a capsule parked in the shell titlebar band re-clamps below it on mount', async () => {
+  const window = dom()
+  const html = window.document.documentElement
+  html.setAttribute('data-windows-titlebar', '')
+  html.style.setProperty('--dsh-windows-titlebar-height', '40px')
+  // The stuck state from the bug report: dragged to the DSH menu row (y≈8) and
+  // saved there; 0.1.19 restored it into the band on every start.
+  window.localStorage.setItem(FLOAT_POSITION_KEY, '{"x":500,"y":8}')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  assert.equal(host.style.top, '48px', 'restored position clamps to margin 8 + band 40 — outside the drag strip')
+  assert.equal(host.style.left, '500px', 'x is untouched')
+  dispose()
+  window.close()
+})
+
+test('drag release above the shell titlebar band docks below it instead', async () => {
+  const window = dom()
+  const html = window.document.documentElement
+  html.setAttribute('data-windows-titlebar', '')
+  html.style.setProperty('--dsh-windows-titlebar-height', '40px')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const capsule = floatSurface(window)
+  capsule.getBoundingClientRect = () => ({
+    left: 100, top: 100, right: 220, bottom: 126,
+    width: 120, height: 26, x: 100, y: 100, toJSON() {},
+  })
+  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 160, clientY: 113 }))
+  // A pointer path whose unclamped pill top-left would be (640, 8) — inside the band.
+  window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 700, clientY: 21 }))
+  await frame(window)
+  assert.match(host.style.transform, /translate3d\(-338px, -686px, 0\)/, 'live drag frames are clamped below the band too')
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 700, clientY: 21, button: 0 }))
+  await turn()
+  const saved = JSON.parse(window.localStorage.getItem(FLOAT_POSITION_KEY))
+  assert.deepEqual(saved, { x: 640, y: 48 }, 'release docks at margin 8 + band 40')
+  assert.equal(host.style.top, '48px')
+  dispose()
+  window.close()
+})
+
+test('the panel header clears the shell titlebar band when anchored beside a high capsule', async () => {
+  const window = dom()
+  const html = window.document.documentElement
+  html.setAttribute('data-windows-titlebar', '')
+  html.style.setProperty('--dsh-windows-titlebar-height', '40px')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const capsule = floatSurface(window)
+  capsule.getBoundingClientRect = () => ({
+    left: 100, top: 8, right: 220, bottom: 34,
+    width: 120, height: 26, x: 100, y: 8, toJSON() {},
+  })
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.style.left, '228px', 'anchor side is unchanged')
+  assert.equal(panel.style.top, '48px', 'panel top clamps to margin 8 + band 40 — the ✕ stays clickable')
+  dispose()
+  window.close()
+})
+
+test('without the shell titlebar attributes nothing moves — Web behavior is byte-identical', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const capsule = floatSurface(window)
+  window.localStorage.setItem(FLOAT_POSITION_KEY, '{"x":500,"y":8}')
+  window.dispatchEvent(new window.Event('resize'))
+  await turn()
+  assert.equal(host.style.top, '8px', 'no band → no extra clamp on the capsule')
+  capsule.getBoundingClientRect = () => ({
+    left: 100, top: 8, right: 220, bottom: 34,
+    width: 120, height: 26, x: 100, y: 8, toJSON() {},
+  })
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.style.top, '8px', 'no band → no extra clamp on the panel')
+  dispose()
+  window.close()
+})
+
 test('scroll re-anchors the panel through the coalesced frame', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
