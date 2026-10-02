@@ -929,6 +929,8 @@ test('0.1.2 regression guards: hidden-attr display rules and 0.0.18 panel sizing
   assert.match(cardStyle, /@media print\s*{\s*:host { display: none !important; }/, 'card hides in print')
   assert.match(floatStyle, /min-width: 166px/, 'panel width strategy matches the 0.0.18 pop (content-driven, capped)')
   assert.doesNotMatch(floatStyle, /max-width: 240px/, 'overview rows keep the 0.0.18 full-row width (bars ≈112px)')
+  assert.match(floatStyle, /\.dqw-bar { display: block; flex: 0 0 auto; width: 120px;/, 'panel bars are a fixed 120px (owner-set 4× length)')
+  assert.match(cardStyle, /\.dqw-bar { display: block; flex: 1;/, 'card rows keep the adaptive flex bar')
   assert.match(cardStyle, /@media print\s*{\s*:host { display: none !important; }/, 'card hides in print')
   dispose()
   window.close()
