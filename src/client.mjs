@@ -120,9 +120,10 @@ const STYLE_TEXT = `
 // card shadow keeps its own copies for the sidebar rows.
 const FLOAT_STYLE_TEXT = `
 :host { position: fixed; z-index: 2147483000; }
-.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; position: relative; touch-action: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: grab; user-select: none; white-space: nowrap; position: relative; touch-action: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
 .dqw-capsule::before { content: ''; position: absolute; inset: -9px; }
-.dqw-capsule:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
+.dqw-capsule:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); box-shadow: 0 6px 18px rgba(0,0,0,.28); }
+.dqw-capsule:active { transform: scale(.98); }
 .dqw-capsule:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
 .dqw-capsule-sep { opacity: .5; }
 .dqw-capsule-glm, .dqw-capsule-copilot { font-variant-numeric: tabular-nums; font-weight: 600; }
@@ -132,6 +133,7 @@ const FLOAT_STYLE_TEXT = `
 .dqw-capsule--dragging { cursor: grabbing; -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); will-change: transform; transition: none; }
 @media (prefers-reduced-motion: no-preference) {
   .dqw-capsule[data-alert] { animation: dqw-pulse 1.6s ease-in-out infinite; }
+  .dqw-capsule { transition: border-color .12s ease-out, box-shadow .12s ease-out; }
   .dqw-capsule--snapping { transition: transform 150ms cubic-bezier(.2,.8,.2,1); }
 }
 @media print { :host { display: none !important; } }
