@@ -922,6 +922,11 @@ export function mountQuotaCard({
     container.hidden = !showCard && !showRail
     if (showRail) container.dataset.dshQuotaWatchSidebarCollapsed = ''
     else delete container.dataset.dshQuotaWatchSidebarCollapsed
+    // The card ↔ rail swap is driven by INLINE styles: know-how 017's lesson —
+    // critical visibility state must not depend on stylesheet rules that
+    // external actors (aggressive extensions) may neuter in the user's browser.
+    card.style.display = showCard ? '' : 'none'
+    railTrigger.style.display = showRail ? 'inline-flex' : 'none'
   }
   const footResizeObserver = typeof win.ResizeObserver === 'function'
     ? new win.ResizeObserver(() => { syncCardVisibility() })
