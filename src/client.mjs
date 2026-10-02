@@ -107,13 +107,6 @@ const STYLE_TEXT = `
 .dqw-chev { font-size: 9px; line-height: 14px; opacity: .6; flex: none; width: 10px; text-align: center; }
 .dqw-stale-mark { flex: none; font-size: 9px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); cursor: help; }
 .dqw-errtext { font-size: 10px; line-height: 14px; opacity: .7; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dqw-rail-trigger { display: none; flex: none; align-items: center; justify-content: center; width: 36px; height: 36px; margin: 0; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--dsw-alias-label-primary, inherit); cursor: pointer; transition: background-color .12s, color .12s; }
-.dqw-rail-trigger svg { display: block; width: 16px; height: 16px; }
-.dqw-rail-trigger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
-.dqw-rail-trigger:active:not(:disabled), .dqw-rail-trigger[aria-expanded="true"] { background: var(--dsw-alias-interactive-bg-active, rgba(128,128,128,.18)); color: var(--dsw-alias-label-primary, inherit); }
-.dqw-rail-trigger:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
-:host([data-dsh-quota-watch-sidebar-collapsed]) .dqw-card { display: none; }
-:host([data-dsh-quota-watch-sidebar-collapsed]) .dqw-rail-trigger { display: inline-flex; }
 @media print { :host { display: none !important; } }
 `
 
@@ -392,18 +385,7 @@ export function mountQuotaCard({
   const lastUpdated = text(doc, 'p', 'dqw-meta', copy.loading)
   lastUpdated.dataset.role = 'updated'
   body.append(lastUpdated)
-  // Collapsed web rail (0.0.18 behaviour, card opt-in only): a 36px gauge icon
-  // replaces the card body; the shadow CSS swaps them on the host's collapsed flag.
-  const railTrigger = doc.createElement('button')
-  railTrigger.type = 'button'
-  railTrigger.className = 'dqw-rail-trigger'
-  railTrigger.dataset.dshQuotaWatchRail = ''
-  railTrigger.title = copy.title
-  railTrigger.setAttribute('aria-label', copy.title)
-  railTrigger.setAttribute('aria-haspopup', 'dialog')
-  railTrigger.setAttribute('aria-expanded', 'false')
-  railTrigger.append(quotaIcon(doc))
-  card.append(body, railTrigger)
+  card.append(body)
   cardRoot.append(style, card)
   // Details open in a viewport-level floating panel — the only detail surface.
   const panel = doc.createElement('div')
@@ -771,7 +753,6 @@ export function mountQuotaCard({
       lastAnchor = null
       panelNav = false
       surface.setAttribute('aria-expanded', 'false')
-      railTrigger.setAttribute('aria-expanded', 'false')
       return
     }
     if (openKey === 'overview') {
@@ -782,7 +763,6 @@ export function mountQuotaCard({
       panel.hidden = false
       placePanel()
       surface.setAttribute('aria-expanded', 'true')
-      railTrigger.setAttribute('aria-expanded', 'true')
       return
     }
     const provider = (snapshot?.providers ?? []).find((item) => item?.key === openKey)
@@ -799,7 +779,6 @@ export function mountQuotaCard({
     panel.hidden = false
     placePanel()
     surface.setAttribute('aria-expanded', 'true')
-    railTrigger.setAttribute('aria-expanded', 'true')
   }
 
   const renderFloatFace = () => {
@@ -877,15 +856,6 @@ export function mountQuotaCard({
     event.preventDefault()
     openMenu()
   }
-  /** Collapsed-rail gauge icon: toggles the panel, exactly like the capsule. */
-  const onRailClick = () => {
-    if (openKey !== undefined && !panel.hidden) {
-      openKey = undefined
-      syncPop()
-      return
-    }
-    openOverview(railTrigger)
-  }
   const onMenuClick = (event) => {
     const item = event.target?.closest?.('[data-menu]')
     if (!item) return
@@ -915,26 +885,12 @@ export function mountQuotaCard({
     // build (0.2.0-rc.2 web) never writes data-sidebar-collapsed on collapse
     // (verified via CDP + bundle grep), but the foot container measurably
     // narrows — and the 36px gauge icon fits any rail.
-    const cardOn = !surfaceFlags.cardHidden
-    const narrowOrCollapsed = footTooNarrow || sidebarCollapsed
-    const showCard = cardOn && !narrowOrCollapsed && !noDataHidden
-    const showRail = cardOn && narrowOrCollapsed && !noDataHidden
-    container.hidden = !showCard && !showRail
-    if (showRail) container.dataset.dshQuotaWatchSidebarCollapsed = ''
-    else delete container.dataset.dshQuotaWatchSidebarCollapsed
-    // The card ↔ rail swap is driven by INLINE styles (know-how 017's lesson),
-    // AND the collapsed rail gets an explicit 38px box: CDP layout-chain dump
-    // showed the 0.2.0 framework flex-collapsing unknown foot children to 0px
-    // height, so the gauge must opt out of the flex squeeze to be visible.
+    // The sidebar card shows ONLY in an expanded sidebar: the width guard hides
+    // it in narrow rails / squeezed containers (works on every profile), and no
+    // host collapse signal is consulted at all (they proved host-specific).
+    const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden
+    container.hidden = !showCard
     card.style.display = showCard ? '' : 'none'
-    railTrigger.style.display = showRail ? 'inline-flex' : 'none'
-    if (showRail) {
-      container.style.height = SURFACE_SIZE + 'px'
-      container.style.flex = '0 0 auto'
-    } else {
-      container.style.height = ''
-      container.style.flex = ''
-    }
   }
   const footResizeObserver = typeof win.ResizeObserver === 'function'
     ? new win.ResizeObserver(() => { syncCardVisibility() })
@@ -1009,28 +965,10 @@ export function mountQuotaCard({
     })
   }
 
-  // Web narrow-rail collapse: the host keeps the footArea but squeezes it, which
-  // clips the card into garbled text — hide the card and let the capsule carry
-  // the entry (0.0.18 shipped dedicated rail CSS; 0.1.0 retired it, and 0.1.2
-  // reintroduces only this visibility signal — zero layout coupling).
-  let sidebarCollapsed = Boolean(doc.querySelector('[data-sidebar-collapsed]'))
-  const syncSidebarCollapsed = () => {
-    const next = Boolean(doc.querySelector('[data-sidebar-collapsed]'))
-    if (next !== sidebarCollapsed) {
-      sidebarCollapsed = next
-      renderAll()
-    }
-  }
   const observer = new win.MutationObserver(() => {
-    syncSidebarCollapsed()
     schedulePlace()
   })
-  observer.observe(doc.body, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['data-sidebar-collapsed'],
-  })
+  observer.observe(doc.body, { childList: true, subtree: true })
   place()
 
   const startPolling = () => {
@@ -1144,7 +1082,6 @@ export function mountQuotaCard({
   surface.addEventListener('click', onSurfaceClick)
   surface.addEventListener('keydown', onSurfaceKeydown)
   surface.addEventListener('contextmenu', onSurfaceContext)
-  railTrigger.addEventListener('click', onRailClick)
   let disposeDrag = attachDrag(surface)
   doc.addEventListener('visibilitychange', onVisibilityChange)
   doc.addEventListener('pointerdown', onDocPointerDown, true)
@@ -1168,7 +1105,6 @@ export function mountQuotaCard({
     surface.removeEventListener('click', onSurfaceClick)
     surface.removeEventListener('keydown', onSurfaceKeydown)
     surface.removeEventListener('contextmenu', onSurfaceContext)
-    railTrigger.removeEventListener('click', onRailClick)
     menu.removeEventListener('click', onMenuClick)
     disposeDrag()
     container.remove()
