@@ -1048,14 +1048,21 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   assert.equal(cells[1].textContent, '·')
   assert.equal(cells[2].textContent, 'used')
   assert.match(cells[3].textContent, /1%/)
-  assert.match(cells[4].textContent, /^（ Resets: .+ ）$/)
+  assert.match(cells[4].textContent, /^\( Resets: .+ \)$/)
   assert.match(cells[4].textContent, /2026\/11\/01/)
   assert.equal(cells[5].textContent, '5-hour quota')
   assert.match(cells[8].textContent, /13%/)
   assert.equal(cells[10].textContent, 'Weekly quota')
   assert.equal(cells[11].textContent, '·')
   assert.match(cells[12].textContent, /♾️/, 'unlimited mark aligns with the used column')
-  assert.equal(cells[14].textContent, ' ( unlimited )')
+  assert.equal(cells[14].textContent, '( unlimited )')
+  // Alignment invariant: every note in the grid starts with the SAME paren
+  // glyph and no leading whitespace, so the 1fr note column's left edges line
+  // up across rows (0.1.15 mixed （ Resets with ' ( unlimited )' in en).
+  for (const index of [4, 9, 14]) {
+    assert.match(cells[index].textContent, /^\(/, `en note ${index} starts with the ASCII paren`)
+    assert.doesNotMatch(cells[index].textContent, /^\s/, `en note ${index} carries no leading whitespace`)
+  }
   for (const index of [4, 9]) {
     assert.ok(cells[index].classList.contains('dqw-kv-sub'), 'reset time renders as weakened text')
   }
@@ -1084,6 +1091,9 @@ test('Chinese reset and unlimited notes use spaced parentheses and padded dates'
   assert.match(cells[4].textContent, /^（ 重置: .+ ）$/)
   assert.match(cells[4].textContent, /2026\/01\/01/)
   assert.equal(cells[14].textContent, '（ 无限 ）')
+  for (const index of [4, 9, 14]) {
+    assert.match(cells[index].textContent, /^（/, `zh note ${index} starts with the full-width paren`)
+  }
   dispose()
   window.close()
 })
