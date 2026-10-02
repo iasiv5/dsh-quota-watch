@@ -37,9 +37,9 @@ _Avoid_: Calling it a quota; session usage; treating the interval as a rolling w
 The persistent, draggable floating pill — the plugin's only guaranteed surface — that renders each provider's used percentage in one line. It mounts at the top level of the page (never inside host-managed containers), carries the context menu, and is the panel's primary entry point.
 _Avoid_: floating ball, ball, floating window, FAB, widget, mini mode
 
-**Edge docking**:
-The capsule's rest behavior of settling, fully visible, against the nearest left or right viewport edge after a drag; the docked edge and vertical offset are what persist across sessions.
-_Avoid_: magnetic snap (implementation flavor), peek (half-hidden docking is never used), free coordinates
+**Free-floating position memory**:
+The capsule's position persistence behavior where user-placed coordinates {x, y} are remembered across sessions, with the element's measured geometry kept clamped inside viewport boundaries and safe-area margins.
+_Avoid_: edge docking (retired), magnetic snap, peek, unconstrained coordinates
 
 **Panel**:
 The floating detail surface opened from the capsule or a card row; it renders the quota overview and per-provider detail views.

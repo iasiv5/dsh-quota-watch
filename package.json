@@ -1,6 +1,6 @@
 {
   "name": "@iasiv5/dsh-quota-watch",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "DSH Web sidebar monitor for GLM Coding Plan quotas and GitHub Copilot credits",
   "type": "module",
   "main": "./src/host.mjs",
