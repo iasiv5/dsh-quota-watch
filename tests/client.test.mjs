@@ -660,6 +660,85 @@ test('the grab point stays under the cursor while dragging', async () => {
   window.close()
 })
 
+test('touch pointers get the larger drag slop, mouse keeps 6px', async () => {
+  const window = dom()
+  window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const capsule = floatSurface(window)
+  const restLeft = 8
+  const restTop = 80
+  capsule.getBoundingClientRect = () => ({
+    left: restLeft, top: restTop, right: restLeft + 120, bottom: restTop + 26,
+    width: 120, height: 26, x: restLeft, y: restTop, toJSON() {},
+  })
+  const down = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: restLeft + 60, clientY: restTop + 13 })
+  Object.defineProperty(down, 'pointerType', { value: 'touch' })
+  capsule.dispatchEvent(down)
+  // 8px: under the 10px touch slop → still a tap, not a drag.
+  const move8 = new window.MouseEvent('pointermove', { bubbles: true, clientX: restLeft + 68, clientY: restTop + 13 })
+  Object.defineProperty(move8, 'pointerType', { value: 'touch' })
+  window.document.dispatchEvent(move8)
+  await frame(window)
+  assert.equal(capsule.style.transform, '', '8px is under the touch slop (10px)')
+  // 12px: past the touch slop → dragging.
+  const move12 = new window.MouseEvent('pointermove', { bubbles: true, clientX: restLeft + 72, clientY: restTop + 13 })
+  Object.defineProperty(move12, 'pointerType', { value: 'touch' })
+  window.document.dispatchEvent(move12)
+  await frame(window)
+  assert.match(capsule.style.transform, /translate3d\(12px, 0px, 0\) scale\(1\.03\)/, '12px crosses the touch slop')
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: restLeft + 72, clientY: restTop + 13, button: 0 }))
+  await turn()
+  dispose()
+  window.close()
+
+  const mouse = dom()
+  mouse.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
+  await mounted(mouse, snapshot([glmProvider(), copilotProvider()]))
+  const mouseCapsule = floatSurface(mouse)
+  mouseCapsule.getBoundingClientRect = () => ({
+    left: 8, top: 80, right: 128, bottom: 106, width: 120, height: 26, x: 8, y: 80, toJSON() {},
+  })
+  mouseCapsule.dispatchEvent(new mouse.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 68, clientY: 93 }))
+  mouse.document.dispatchEvent(new mouse.MouseEvent('pointermove', { bubbles: true, clientX: 76, clientY: 93 }))
+  await frame(mouse)
+  assert.ok(mouseCapsule.style.transform.includes('translate3d(8px'), '8px crosses the mouse slop (6px)')
+  mouse.document.dispatchEvent(new mouse.MouseEvent('pointerup', { bubbles: true, clientX: 76, clientY: 93, button: 0 }))
+  await turn()
+  dispose()
+  mouse.close()
+})
+
+test('pointercancel aborts the drag cleanly without persisting', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const capsule = floatSurface(window)
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const restLeft = window.innerWidth - 8 - 38
+  const restTop = window.innerHeight - 8 - 26
+  capsule.getBoundingClientRect = () => ({
+    left: restLeft, top: restTop, right: restLeft + 120, bottom: restTop + 26,
+    width: 120, height: 26, x: restLeft, y: restTop, toJSON() {},
+  })
+  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: restLeft + 60, clientY: restTop + 13 }))
+  window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 700, clientY: 500 }))
+  await frame(window)
+  assert.ok(capsule.style.transform.includes('translate3d'), 'drag is active before the cancel')
+  // doc-level listener relies on bubbling: jsdom events default composed:false.
+  window.document.dispatchEvent(new window.Event('pointercancel', { bubbles: true }))
+  await turn()
+  assert.equal(capsule.style.transform, '', 'cancel clears the gesture transform')
+  assert.ok(!capsule.className.includes('dqw-capsule--dragging'))
+  assert.equal(window.document.body.style.userSelect, '', 'userSelect is restored')
+  assert.equal(window.localStorage.getItem(FLOAT_DOCK_KEY), null, 'cancel never persists a dock')
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, false, 'cancel does not suppress the click')
+  dispose()
+  window.close()
+})
+
 test('release snaps to the dock through the animation path when motion is allowed', async () => {
   const window = dom()
   window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
@@ -701,7 +780,7 @@ test('release snaps to the dock through the animation path when motion is allowe
   window.close()
 })
 
-test('float style text carries the drag affordances', async () => {
+test('float style text carries the drag and touch affordances', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
@@ -711,6 +790,10 @@ test('float style text carries the drag affordances', async () => {
   assert.match(css, /will-change:\s*transform/)
   assert.match(css, /backdrop-filter:\s*none/)
   assert.match(css, /prefers-reduced-motion: no-preference/)
+  assert.match(css, /touch-action:\s*none/, 'touch panning must not steal the drag gesture')
+  assert.match(css, /-webkit-tap-highlight-color:\s*transparent/)
+  assert.match(css, /-webkit-touch-callout:\s*none/)
+  assert.match(css, /\.dqw-capsule::before[^}]*inset:\s*-9px/, 'hit area padded to 44px around the 26px pill')
   dispose()
   window.close()
 })

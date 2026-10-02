@@ -1,7 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
 import { MARGIN, clampPoint, loadFloatDock, loadSurfaceFlags, saveFloatDock, saveSurfaceFlags } from './client/prefs.mjs'
-import { clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
+import { DRAG_SLOP_MOUSE, clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -120,7 +120,8 @@ const STYLE_TEXT = `
 // card shadow keeps its own copies for the sidebar rows.
 const FLOAT_STYLE_TEXT = `
 :host { position: fixed; z-index: 2147483000; }
-.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; }
+.dqw-capsule { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 999px; background: var(--dsw-alias-bg-base, rgba(128,128,128,.08)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(10px) saturate(1.2); backdrop-filter: blur(10px) saturate(1.2); box-shadow: 0 4px 14px rgba(0,0,0,.22); color: var(--dsw-alias-label-primary, inherit); font: inherit; font-size: 11px; line-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; position: relative; touch-action: none; -webkit-tap-highlight-color: transparent; -webkit-touch-callout: none; }
+.dqw-capsule::before { content: ''; position: absolute; inset: -9px; }
 .dqw-capsule:hover { border-color: var(--dsw-alias-border-primary, var(--dsw-alias-border-secondary, rgba(128,128,128,.35))); }
 .dqw-capsule:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary, #5b8def); outline-offset: 2px; }
 .dqw-capsule-sep { opacity: .5; }
@@ -483,6 +484,7 @@ export function mountQuotaCard({
     let moved = false
     let originX = 0
     let originY = 0
+    let slop = DRAG_SLOP_MOUSE
     let grab = { dx: 0, dy: 0 }
     let dragSize = FALLBACK_SIZE
     let restX = 0
@@ -494,6 +496,8 @@ export function mountQuotaCard({
       moved = false
       originX = event.clientX
       originY = event.clientY
+      // Graded slop: touch/pen get 10px so taps win over drags (Task 6).
+      slop = dragSlop(event.pointerType)
       const rect = surfaceEl.getBoundingClientRect()
       grab = grabOffset({ x: event.clientX, y: event.clientY }, rect)
       dragSize = rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
@@ -504,7 +508,7 @@ export function mountQuotaCard({
     const onPointerMove = (event) => {
       if (!dragging) return
       if (!moved) {
-        if (Math.hypot(event.clientX - originX, event.clientY - originY) < dragSlop(event.pointerType)) return
+        if (Math.hypot(event.clientX - originX, event.clientY - originY) < slop) return
         moved = true
         doc.body.style.userSelect = 'none'
         surfaceEl.classList.add('dqw-capsule--dragging')
@@ -564,13 +568,24 @@ export function mountQuotaCard({
         finishDragRelease(dock)
       }
     }
+    /** A canceled pointer (scroll takeover, incoming call, palm) resets the
+     * gesture: no dock is persisted and the trailing click stays allowed. */
+    const onPointerCancel = () => {
+      if (!dragging) return
+      dragging = false
+      doc.body.style.userSelect = ''
+      surfaceEl.classList.remove('dqw-capsule--dragging', 'dqw-capsule--snapping')
+      surfaceEl.style.transform = ''
+    }
     surfaceEl.addEventListener('pointerdown', onPointerDown)
     doc.addEventListener('pointermove', onPointerMove)
     doc.addEventListener('pointerup', onPointerUp)
+    doc.addEventListener('pointercancel', onPointerCancel)
     return () => {
       surfaceEl.removeEventListener('pointerdown', onPointerDown)
       doc.removeEventListener('pointermove', onPointerMove)
       doc.removeEventListener('pointerup', onPointerUp)
+      doc.removeEventListener('pointercancel', onPointerCancel)
     }
   }
   let snapshot
