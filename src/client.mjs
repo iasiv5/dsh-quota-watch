@@ -519,6 +519,18 @@ export function mountQuotaCard({
         longPressTimer = undefined
       }
     }
+    /** Doc-level move/up/cancel are bound only while a gesture is active —
+     * the pill's resting state costs zero document-level listeners. */
+    const bindGesture = () => {
+      doc.addEventListener('pointermove', onPointerMove)
+      doc.addEventListener('pointerup', onPointerUp)
+      doc.addEventListener('pointercancel', onPointerCancel)
+    }
+    const unbindGesture = () => {
+      doc.removeEventListener('pointermove', onPointerMove)
+      doc.removeEventListener('pointerup', onPointerUp)
+      doc.removeEventListener('pointercancel', onPointerCancel)
+    }
     const onPointerDown = (event) => {
       if (event.button !== 0) return
       dragging = true
@@ -545,6 +557,7 @@ export function mountQuotaCard({
       restX = Number.parseFloat(floatHost.style.left) || 0
       restY = Number.parseFloat(floatHost.style.top) || 0
       surfaceEl.setPointerCapture?.(event.pointerId)
+      bindGesture()
     }
     const onPointerMove = (event) => {
       if (!dragging) return
@@ -577,6 +590,7 @@ export function mountQuotaCard({
       if (!dragging) return
       dragging = false
       clearLongPress()
+      unbindGesture()
       doc.body.style.userSelect = ''
       if (!moved) return
       const viewWidth = win.innerWidth ?? 1024
@@ -617,20 +631,17 @@ export function mountQuotaCard({
       if (!dragging) return
       dragging = false
       clearLongPress()
+      unbindGesture()
       doc.body.style.userSelect = ''
       surfaceEl.classList.remove('dqw-capsule--dragging', 'dqw-capsule--snapping')
       surfaceEl.style.transform = ''
     }
     surfaceEl.addEventListener('pointerdown', onPointerDown)
-    doc.addEventListener('pointermove', onPointerMove)
-    doc.addEventListener('pointerup', onPointerUp)
-    doc.addEventListener('pointercancel', onPointerCancel)
-    return () => {
+    const disposeDrag = () => {
       surfaceEl.removeEventListener('pointerdown', onPointerDown)
-      doc.removeEventListener('pointermove', onPointerMove)
-      doc.removeEventListener('pointerup', onPointerUp)
-      doc.removeEventListener('pointercancel', onPointerCancel)
+      unbindGesture()
     }
+    return disposeDrag
   }
   let snapshot
   let requestSequence = 0
@@ -1189,7 +1200,16 @@ export function mountQuotaCard({
     openKey = undefined
     renderAll()
   }
-  const onDocScroll = () => { placePanel() }
+  let scrollFrameQueued = false
+  const onDocScroll = () => {
+    // Coalesce scroll bursts into one placement per frame (mobile inertia).
+    if (scrollFrameQueued || disposed) return
+    scrollFrameQueued = true
+    scheduleFrame(() => {
+      scrollFrameQueued = false
+      if (!disposed) placePanel()
+    })
+  }
   const onWinResize = () => {
     placePanel()
     syncCardVisibility()

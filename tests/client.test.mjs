@@ -834,6 +834,29 @@ test('safe-area insets shift the dock away from the notch', async () => {
   window.close()
 })
 
+test('scroll re-anchors the panel through the coalesced frame', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const capsule = floatSurface(window)
+  let rect = { left: 100, top: 50, right: 220, bottom: 76, width: 120, height: 26, x: 100, y: 50, toJSON() {} }
+  capsule.getBoundingClientRect = () => rect
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.style.left, '228px', 'anchored at rect.right + 8')
+  // A scroll burst moves the anchor; one coalesced frame must be enough to
+  // re-anchor (the lock fails if scroll handling ever stops updating).
+  rect = { ...rect, left: 200, right: 320, x: 200 }
+  window.document.dispatchEvent(new window.Event('scroll', { bubbles: true }))
+  window.document.dispatchEvent(new window.Event('scroll', { bubbles: true }))
+  window.document.dispatchEvent(new window.Event('scroll', { bubbles: true }))
+  await frame(window)
+  assert.equal(panel.style.left, '328px', 're-anchored after the coalesced frame')
+  dispose()
+  window.close()
+})
+
 test('release snaps to the dock through the animation path when motion is allowed', async () => {
   const window = dom()
   window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
