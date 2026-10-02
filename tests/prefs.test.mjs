@@ -2,13 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   FLOAT_DOCK_KEY,
-  FLOAT_GEOMETRY_KEY,
   SURFACE_FLAGS_KEY,
   clampPoint,
   loadFloatDock,
   saveFloatDock,
-  loadFloatGeometry,
-  saveFloatGeometry,
   loadSurfaceFlags,
   saveSurfaceFlags,
 } from '../src/client/prefs.mjs'
@@ -35,22 +32,6 @@ test('clampPoint shrinks the upper bound by the element size', () => {
   const tiny = clampPoint({ x: 50, y: 50 }, { width: 10, height: 10 }, 38)
   assert.equal(tiny.x, 8)
   assert.equal(tiny.y, 8)
-})
-
-test('loadFloatGeometry returns null for missing or corrupt JSON and round-trips valid values', () => {
-  const storage = storageStub()
-  assert.equal(loadFloatGeometry(storage), null)
-  storage.setItem(FLOAT_GEOMETRY_KEY, '{')
-  assert.equal(loadFloatGeometry(storage), null)
-  saveFloatGeometry(storage, { x: 12, y: 34 })
-  assert.deepEqual(loadFloatGeometry(storage), { x: 12, y: 34 })
-})
-
-test('loadFloatGeometry rejects non-finite coordinates', () => {
-  const storage = storageStub({ [FLOAT_GEOMETRY_KEY]: '{"x":"a","y":1}' })
-  assert.equal(loadFloatGeometry(storage), null)
-  storage.setItem(FLOAT_GEOMETRY_KEY, '{"x":1}')
-  assert.equal(loadFloatGeometry(storage), null)
 })
 
 test('surface flags default to card hidden (capsule-first) and survive corruption', () => {

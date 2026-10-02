@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
 import { mountQuotaCard } from '../src/client.mjs'
-import { FLOAT_GEOMETRY_KEY, SURFACE_FLAGS_KEY } from '../src/client/prefs.mjs'
+import { FLOAT_DOCK_KEY, SURFACE_FLAGS_KEY } from '../src/client/prefs.mjs'
 
 function response(payload, status = 200) {
   return new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
@@ -453,31 +453,60 @@ test('without a sidebar footer the floating capsule is the only surface', async 
   window.close()
 })
 
-test('capsule restores persisted geometry and clamps off-screen positions', async () => {
+test('capsule restores the persisted dock and clamps off-screen offsets', async () => {
   const seeded = dom()
-  seeded.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":120,"y":80}')
+  seeded.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
   const seededMounted = await mounted(seeded, snapshot([glmProvider(), copilotProvider()]))
   const seededHost = seeded.document.querySelector('[data-dsh-quota-watch-float]')
-  assert.equal(seededHost.style.left, '120px')
+  assert.equal(seededHost.style.left, '8px')
   assert.equal(seededHost.style.top, '80px')
   seededMounted.dispose()
   seeded.close()
 
   const window = dom()
-  window.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":-500,"y":99999}')
+  Object.defineProperty(window, 'innerHeight', { value: 600, configurable: true })
+  window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":99999}')
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  const left = parseFloat(host.style.left)
-  const top = parseFloat(host.style.top)
-  assert.ok(left >= 8 && left <= window.innerWidth - 8 - 38, `left clamped: ${left}`)
-  assert.ok(top >= 8 && top <= window.innerHeight - 8 - 38, `top clamped: ${top}`)
-  const saved = JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY))
-  assert.deepEqual(saved, { x: -500, y: 99999 }, 'mount clamps visually but never clobbers the stored preference')
+  assert.ok(parseFloat(host.style.top) <= 600 - 8 - 26, `top clamped to 600-8-26 band, got ${host.style.top}`)
+  const saved = JSON.parse(window.localStorage.getItem(FLOAT_DOCK_KEY))
+  assert.deepEqual(saved, { edge: 'left', offsetY: 99999 }, 'mount clamps visually but never clobbers the stored dock')
   dispose()
+  window.close()
+
+  const corrupted = dom()
+  corrupted.localStorage.setItem(FLOAT_DOCK_KEY, 'not-json')
+  const corruptedMounted = await mounted(corrupted, snapshot([glmProvider(), copilotProvider()]))
+  const corruptedHost = corrupted.document.querySelector('[data-dsh-quota-watch-float]')
+  assert.equal(corruptedHost.style.left, `${corrupted.innerWidth - 8 - 38}px`, 'corrupt dock falls back to the right-edge default with the fallback width')
+  assert.equal(corruptedHost.style.top, `${corrupted.innerHeight - 8 - 26}px`)
+  corruptedMounted.dispose()
+  corrupted.close()
+})
+
+test('dock x derives from the measured capsule width, not the fallback box', async () => {
+  const window = dom()
+  window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"right","offsetY":80}')
+  const original = window.Element.prototype.getBoundingClientRect
+  window.Element.prototype.getBoundingClientRect = function () {
+    if (this?.dataset?.dshQuotaWatchCapsule === '') {
+      return { left: 0, top: 0, right: 120, bottom: 26, width: 120, height: 26, x: 0, y: 0, toJSON() {} }
+    }
+    return original.call(this)
+  }
+  try {
+    const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+    const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+    assert.equal(host.style.left, `${window.innerWidth - 8 - 120}px`, 'right dock x = viewport - margin - measured width')
+    assert.equal(host.style.top, '80px')
+    dispose()
+  } finally {
+    window.Element.prototype.getBoundingClientRect = original
+  }
   window.close()
 })
 
-test('capsule drag persists clamped geometry and suppresses the trailing click', async () => {
+test('capsule drag persists the dock and suppresses the trailing click', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
@@ -485,12 +514,12 @@ test('capsule drag persists clamped geometry and suppresses the trailing click',
   const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
   capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
   window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 560, clientY: 520 }))
+  assert.equal(host.style.left, '560px', 'Task 4 keeps the legacy top-left-follow movement (Task 5 replaces it)')
   window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 560, clientY: 520, button: 0 }))
   await turn()
-  const saved = JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY))
-  assert.equal(saved.x, 560)
-  assert.equal(saved.y, 520)
-  assert.equal(host.style.left, '560px')
+  const saved = JSON.parse(window.localStorage.getItem(FLOAT_DOCK_KEY))
+  assert.deepEqual(saved, { edge: 'right', offsetY: 520 }, 'release docks right (pill center 579 > midline 512)')
+  assert.equal(host.style.left, `${window.innerWidth - 8 - 38}px`, 'rest x derived from the dock edge')
   assert.equal(host.style.top, '520px')
   capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
@@ -568,7 +597,7 @@ test('capsule keyboard activation opens the panel', async () => {
   window.close()
 })
 
-test('capsule drag persists geometry', async () => {
+test('capsule drag persists the dock', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
@@ -577,10 +606,10 @@ test('capsule drag persists geometry', async () => {
   window.document.dispatchEvent(new window.MouseEvent('pointermove', { bubbles: true, clientX: 420, clientY: 260 }))
   window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 420, clientY: 260, button: 0 }))
   await turn()
-  const saved = JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY))
-  assert.equal(saved.x, 420)
-  assert.equal(saved.y, 260)
-  assert.equal(host.style.left, '420px')
+  const saved = JSON.parse(window.localStorage.getItem(FLOAT_DOCK_KEY))
+  assert.deepEqual(saved, { edge: 'left', offsetY: 260 }, 'release docks left (pill center 439 < midline 512)')
+  assert.equal(host.style.left, '8px')
+  assert.equal(host.style.top, '260px')
   dispose()
   window.close()
 })
@@ -966,21 +995,20 @@ test('a narrow foot hides the card on any profile, without any collapse signal',
   window.close()
 })
 
-test('shrinking the viewport re-clamps the capsule without clobbering stored geometry', async () => {
+test('shrinking the viewport re-docks the capsule without clobbering the stored dock', async () => {
   const window = dom()
-  window.localStorage.setItem(FLOAT_GEOMETRY_KEY, '{"x":900,"y":100}')
+  window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"right","offsetY":100}')
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const host = window.document.querySelector('[data-dsh-quota-watch-float]')
-  assert.equal(host.style.left, '900px')
+  assert.equal(host.style.left, `${window.innerWidth - 8 - 38}px`)
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 })
   Object.defineProperty(window, 'innerHeight', { configurable: true, value: 300 })
   window.dispatchEvent(new window.Event('resize'))
   await turn()
-  const left = parseFloat(host.style.left)
-  const top = parseFloat(host.style.top)
-  assert.ok(left <= 400 - 8 - 38, `left clamped into the small viewport: ${left}`)
-  assert.ok(top <= 300 - 8 - 38, `top clamped into the small viewport: ${top}`)
-  assert.deepEqual(JSON.parse(window.localStorage.getItem(FLOAT_GEOMETRY_KEY)), { x: 900, y: 100 }, 'storage keeps the preferred coordinates')
+  // x re-derives from the stored edge at the new viewport; offsetY clamps visually only.
+  assert.equal(host.style.left, `${400 - 8 - 38}px`)
+  assert.ok(parseFloat(host.style.top) <= 300 - 8 - 26, `top clamped into the small viewport: ${host.style.top}`)
+  assert.deepEqual(JSON.parse(window.localStorage.getItem(FLOAT_DOCK_KEY)), { edge: 'right', offsetY: 100 }, 'storage keeps the preferred dock')
   dispose()
   window.close()
 })

@@ -1,6 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { clampPoint, loadFloatGeometry, loadSurfaceFlags, saveFloatGeometry, saveSurfaceFlags } from './client/prefs.mjs'
+import { MARGIN, clampPoint, loadFloatDock, loadSurfaceFlags, saveFloatDock, saveSurfaceFlags } from './client/prefs.mjs'
+import { dockX, releaseDock } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -8,8 +9,10 @@ export const inject = []
 const CARD_SELECTOR = '[data-dsh-quota-watch-card]'
 const FLOAT_SELECTOR = '[data-dsh-quota-watch-float]'
 const FETCH_TIMEOUT_MS = 15_000
-const SURFACE_SIZE = 38
-const SURFACE_MARGIN = 16
+// Measured-size fallback for environments where getBoundingClientRect reports
+// zeros (jsdom) or the capsule has not painted yet.
+const FALLBACK_SIZE = { width: 38, height: 26 }
+const ZERO_INSETS = { left: 0, right: 0, top: 0, bottom: 0 }
 // Below this a mounted card would clip into unreadable text (collapsed web
 // rails, squeezed desktop layouts) — hide it and let the capsule carry the
 // entry. clientWidth 0 (no layout yet, jsdom) counts as "unknown", not narrow.
@@ -428,22 +431,29 @@ export function mountQuotaCard({
   // fallbacks (broke the light theme). <body> is also transform-free, so
   // position:fixed stays viewport-anchored.
   doc.body.append(floatHost)
-  const applyFloatGeometry = () => {
+  /** Measured capsule size; zeros (jsdom / unpainted) fall back to the box. */
+  const measureSurface = () => {
+    const rect = surface.getBoundingClientRect()
+    return rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
+  }
+  /** Rest position = docked edge + persisted offsetY; x is always derived (ADR 0002). */
+  const applyDock = () => {
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
-    const saved = loadFloatGeometry(win.localStorage)
-    const point = clampPoint(
-      saved ?? { x: viewWidth - SURFACE_MARGIN - SURFACE_SIZE, y: viewHeight - SURFACE_MARGIN - SURFACE_SIZE },
-      { width: viewWidth, height: viewHeight },
-      SURFACE_SIZE,
-    )
-    floatHost.style.left = `${Math.round(point.x)}px`
-    floatHost.style.top = `${Math.round(point.y)}px`
+    const viewport = { width: viewWidth, height: viewHeight }
+    const size = measureSurface()
+    const dock = loadFloatDock(win.localStorage) ?? {
+      edge: 'right',
+      offsetY: viewHeight - MARGIN - size.height,
+    }
     // Deliberately NOT persisted here: a window that starts small (Electron
-    // restore, split-screen) must not clobber the user's preferred coordinates.
-    // The visual clamp above applies every mount; storage updates on drag only.
+    // restore, split-screen) must not clobber the user's stored dock — storage
+    // updates on drag release only; this is the visual clamp.
+    const top = clampPoint({ x: 0, y: dock.offsetY }, viewport, size, ZERO_INSETS).y
+    floatHost.style.left = `${Math.round(dockX(dock.edge, size.width, viewport, ZERO_INSETS))}px`
+    floatHost.style.top = `${Math.round(top)}px`
   }
-  applyFloatGeometry()
+  applyDock()
   // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
   floatRoot.append(panel)
   const menu = doc.createElement('div')
@@ -485,14 +495,18 @@ export function mountQuotaCard({
       if (!moved) return
       const viewWidth = win.innerWidth ?? 1024
       const viewHeight = win.innerHeight ?? 768
-      const point = clampPoint(
+      // Task 4 keeps the legacy top-left-follow movement; the release already
+      // remembers the dock instead of free coordinates (Task 5 adds grab
+      // offset + transform + the snap animation).
+      const dock = releaseDock(
         { x: event.clientX, y: event.clientY },
+        { dx: 0, dy: 0 },
+        measureSurface(),
         { width: viewWidth, height: viewHeight },
-        SURFACE_SIZE,
+        ZERO_INSETS,
       )
-      floatHost.style.left = `${Math.round(point.x)}px`
-      floatHost.style.top = `${Math.round(point.y)}px`
-      saveFloatGeometry(win.localStorage, point)
+      saveFloatDock(win.localStorage, dock)
+      applyDock()
       suppressNextClick = true
     }
     surfaceEl.addEventListener('pointerdown', onPointerDown)
@@ -817,6 +831,9 @@ export function mountQuotaCard({
     const label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
     surface.setAttribute('aria-label', label)
     surface.title = label
+    // Re-derive the docked x every render: the pill's width follows its text,
+    // and the stored dock only knows the edge, not the pixel (ADR 0002).
+    applyDock()
   }
 
   const onSurfaceClick = () => {
@@ -1049,17 +1066,7 @@ export function mountQuotaCard({
   const onWinResize = () => {
     placePanel()
     syncCardVisibility()
-    // Keep the capsule inside a shrunk viewport; storage keeps the user's
-    // preferred coordinates — only the visual position is clamped here.
-    const viewWidth = win.innerWidth ?? 1024
-    const viewHeight = win.innerHeight ?? 768
-    const x = parseFloat(floatHost.style.left)
-    const y = parseFloat(floatHost.style.top)
-    if (Number.isFinite(x) && Number.isFinite(y)) {
-      const point = clampPoint({ x, y }, { width: viewWidth, height: viewHeight }, SURFACE_SIZE)
-      floatHost.style.left = `${Math.round(point.x)}px`
-      floatHost.style.top = `${Math.round(point.y)}px`
-    }
+    applyDock()
   }
   const onDocKeydown = (event) => {
     if (event.key !== 'Escape') return
