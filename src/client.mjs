@@ -1,7 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
 import { MARGIN, clampPoint, loadFloatDock, loadSurfaceFlags, saveFloatDock, saveSurfaceFlags } from './client/prefs.mjs'
-import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, LONG_PRESS_MS, clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
+import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, LONG_PRESS_MS, parseInset, clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -452,9 +452,30 @@ export function mountQuotaCard({
     // Deliberately NOT persisted here: a window that starts small (Electron
     // restore, split-screen) must not clobber the user's stored dock — storage
     // updates on drag release only; this is the visual clamp.
-    const top = clampPoint({ x: 0, y: dock.offsetY }, viewport, size, ZERO_INSETS).y
-    floatHost.style.left = `${Math.round(dockX(dock.edge, size.width, viewport, ZERO_INSETS))}px`
+    const insets = readInsets()
+    const top = clampPoint({ x: 0, y: dock.offsetY }, viewport, size, insets).y
+    floatHost.style.left = `${Math.round(dockX(dock.edge, size.width, viewport, insets))}px`
     floatHost.style.top = `${Math.round(top)}px`
+  }
+  // Safe-area probe: env() insets ride computed padding; jsdom reports '' which
+  // parseInset normalizes to 0, so tests without a stub see zero insets.
+  const safeAreaProbe = text(doc, 'div', '', '')
+  safeAreaProbe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;width:0;height:0;overflow:hidden;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);'
+  floatRoot.append(safeAreaProbe)
+  /** Live env(safe-area-inset-*) reading — re-probed on every use, so window
+   * chrome changes (rotation, URL-bar collapse) need no explicit invalidation. */
+  const readInsets = () => {
+    try {
+      const style = win.getComputedStyle(safeAreaProbe)
+      return {
+        top: parseInset(style?.paddingTop),
+        right: parseInset(style?.paddingRight),
+        bottom: parseInset(style?.paddingBottom),
+        left: parseInset(style?.paddingLeft),
+      }
+    } catch {
+      return ZERO_INSETS
+    }
   }
   applyDock()
   // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
@@ -564,7 +585,7 @@ export function mountQuotaCard({
         grab,
         dragSize,
         { width: viewWidth, height: viewHeight },
-        ZERO_INSETS,
+        readInsets(),
       )
       // jsdom has no matchMedia: the typeof guard keeps the release working
       // (direct commit) where the motion query cannot be asked at all.

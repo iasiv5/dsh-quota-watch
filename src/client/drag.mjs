@@ -41,3 +41,9 @@ export function dockX(edge, width, viewport, insets) {
   const insetRight = Number.isFinite(insets?.right) ? insets.right : 0
   return edge === 'left' ? MARGIN + insetLeft : viewport.width - insetRight - MARGIN - width
 }
+
+/** Computed-style padding value ("20px" | "" | "auto") → numeric inset or 0. */
+export function parseInset(computedValue) {
+  const value = Number.parseFloat(computedValue)
+  return Number.isFinite(value) ? value : 0
+}

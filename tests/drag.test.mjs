@@ -8,6 +8,7 @@ import {
   dragSlop,
   dockX,
   grabOffset,
+  parseInset,
   releaseDock,
 } from '../src/client/drag.mjs'
 
@@ -57,4 +58,11 @@ test('dockX derives the resting x from the edge, measured width and insets', () 
   assert.equal(dockX('right', 120, { width: 400, height: 800 }, ZERO_INSETS), 272)
   assert.equal(dockX('left', 120, { width: 400, height: 800 }, { left: 20, right: 10, top: 0, bottom: 0 }), 28)
   assert.equal(dockX('right', 120, { width: 400, height: 800 }, { left: 20, right: 10, top: 0, bottom: 0 }), 262)
+})
+
+test('parseInset normalizes computed safe-area values to numbers', () => {
+  assert.equal(parseInset('20px'), 20)
+  assert.equal(parseInset(''), 0)
+  assert.equal(parseInset('auto'), 0)
+  assert.equal(parseInset(undefined), 0)
 })

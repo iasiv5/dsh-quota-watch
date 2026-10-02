@@ -822,6 +822,18 @@ test('repeat contextmenu on an open menu is a no-op', async () => {
   window.close()
 })
 
+test('safe-area insets shift the dock away from the notch', async () => {
+  const window = dom()
+  window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
+  window.getComputedStyle = () => ({ paddingTop: '0px', paddingRight: '0px', paddingBottom: '0px', paddingLeft: '20px' })
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  assert.equal(host.style.left, '28px', 'left dock x = margin 8 + inset 20')
+  assert.equal(host.style.top, '80px')
+  dispose()
+  window.close()
+})
+
 test('release snaps to the dock through the animation path when motion is allowed', async () => {
   const window = dom()
   window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
