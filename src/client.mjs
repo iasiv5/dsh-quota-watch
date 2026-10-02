@@ -1,7 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
 import { MARGIN, clampPoint, loadFloatDock, loadSurfaceFlags, saveFloatDock, saveSurfaceFlags } from './client/prefs.mjs'
-import { dockX, releaseDock } from './client/drag.mjs'
+import { clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -128,8 +128,10 @@ const FLOAT_STYLE_TEXT = `
 .dqw-capsule-glm.warn, .dqw-capsule-copilot.warn { color: var(--dsw-alias-label-warning, #d29922); }
 .dqw-capsule-glm.danger, .dqw-capsule-copilot.danger { color: var(--dsw-alias-label-danger, #c93c3c); }
 .dqw-capsule[hidden] { display: none; }
+.dqw-capsule--dragging { cursor: grabbing; -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); will-change: transform; transition: none; }
 @media (prefers-reduced-motion: no-preference) {
   .dqw-capsule[data-alert] { animation: dqw-pulse 1.6s ease-in-out infinite; }
+  .dqw-capsule--snapping { transition: transform 150ms cubic-bezier(.2,.8,.2,1); }
 }
 @media print { :host { display: none !important; } }
 @keyframes dqw-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
@@ -464,29 +466,66 @@ export function mountQuotaCard({
   floatRoot.append(menu)
 
   let suppressNextClick = false
-  /** Whole-surface drag: 6px threshold, top-left follows the pointer, clamp + persist on release.
-   * Move/up listen on `document` — pointer events always bubble there, in browsers and jsdom alike.
-   * Returns a dispose function. */
+  /** One rAF (or a synchronous fallback when the host has none) — drag frames
+   * and scroll re-placement share this gate so a burst of events costs one
+   * layout read/write per frame. */
+  const scheduleFrame = (fn) => (
+    typeof win.requestAnimationFrame === 'function' ? win.requestAnimationFrame.call(win, fn) : fn()
+  )
+  /** Grab-offset + transform drag (ADR 0002): the pill keeps its grab point
+   * under the cursor, moves via transform during the gesture (rAF-batched,
+   * live-clamped to the measured size), and the dock is persisted on release —
+   * optionally through a short snap transition when motion is allowed.
+   * Move/up listen on `document` — pointer events always bubble there, in
+   * browsers and jsdom alike. Returns a dispose function. */
   const attachDrag = (surfaceEl) => {
     let dragging = false
     let moved = false
     let originX = 0
     let originY = 0
+    let grab = { dx: 0, dy: 0 }
+    let dragSize = FALLBACK_SIZE
+    let restX = 0
+    let restY = 0
+    let lastPoint = null
     const onPointerDown = (event) => {
       if (event.button !== 0) return
       dragging = true
       moved = false
       originX = event.clientX
       originY = event.clientY
+      const rect = surfaceEl.getBoundingClientRect()
+      grab = grabOffset({ x: event.clientX, y: event.clientY }, rect)
+      dragSize = rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
+      restX = Number.parseFloat(floatHost.style.left) || 0
+      restY = Number.parseFloat(floatHost.style.top) || 0
       surfaceEl.setPointerCapture?.(event.pointerId)
     }
     const onPointerMove = (event) => {
       if (!dragging) return
-      if (!moved && Math.hypot(event.clientX - originX, event.clientY - originY) < 6) return
-      moved = true
-      doc.body.style.userSelect = 'none'
-      floatHost.style.left = `${Math.round(event.clientX)}px`
-      floatHost.style.top = `${Math.round(event.clientY)}px`
+      if (!moved) {
+        if (Math.hypot(event.clientX - originX, event.clientY - originY) < dragSlop(event.pointerType)) return
+        moved = true
+        doc.body.style.userSelect = 'none'
+        surfaceEl.classList.add('dqw-capsule--dragging')
+      }
+      lastPoint = { x: event.clientX, y: event.clientY }
+      scheduleFrame(() => {
+        if (!dragging || !lastPoint || disposed) return
+        const viewWidth = win.innerWidth ?? 1024
+        const viewHeight = win.innerHeight ?? 768
+        const topLeft = clampFrame(lastPoint, grab, dragSize, { width: viewWidth, height: viewHeight }, ZERO_INSETS)
+        const dx = topLeft.x - restX
+        const dy = topLeft.y - restY
+        surfaceEl.style.transform = `translate3d(${Math.round(dx)}px, ${Math.round(dy)}px, 0) scale(1.03)`
+      })
+    }
+    const finishDragRelease = (dock) => {
+      surfaceEl.classList.remove('dqw-capsule--dragging', 'dqw-capsule--snapping')
+      surfaceEl.style.transform = ''
+      saveFloatDock(win.localStorage, dock)
+      applyDock()
+      suppressNextClick = true
     }
     const onPointerUp = (event) => {
       if (!dragging) return
@@ -495,19 +534,35 @@ export function mountQuotaCard({
       if (!moved) return
       const viewWidth = win.innerWidth ?? 1024
       const viewHeight = win.innerHeight ?? 768
-      // Task 4 keeps the legacy top-left-follow movement; the release already
-      // remembers the dock instead of free coordinates (Task 5 adds grab
-      // offset + transform + the snap animation).
       const dock = releaseDock(
         { x: event.clientX, y: event.clientY },
-        { dx: 0, dy: 0 },
-        measureSurface(),
+        grab,
+        dragSize,
         { width: viewWidth, height: viewHeight },
         ZERO_INSETS,
       )
-      saveFloatDock(win.localStorage, dock)
-      applyDock()
-      suppressNextClick = true
+      // jsdom has no matchMedia: the typeof guard keeps the release working
+      // (direct commit) where the motion query cannot be asked at all.
+      const motionAllowed = typeof win.matchMedia === 'function'
+        && win.matchMedia('(prefers-reduced-motion: no-preference)').matches
+      if (motionAllowed) {
+        surfaceEl.classList.remove('dqw-capsule--dragging')
+        surfaceEl.classList.add('dqw-capsule--snapping')
+        surfaceEl.style.transform = 'translate3d(0px, 0px, 0) scale(1)'
+        let settled = false
+        let snapTimer
+        const settle = () => {
+          if (settled || disposed) return
+          settled = true
+          surfaceEl.removeEventListener('transitionend', settle)
+          win.clearTimeout(snapTimer)
+          finishDragRelease(dock)
+        }
+        surfaceEl.addEventListener('transitionend', settle)
+        snapTimer = win.setTimeout(settle, 200)
+      } else {
+        finishDragRelease(dock)
+      }
     }
     surfaceEl.addEventListener('pointerdown', onPointerDown)
     doc.addEventListener('pointermove', onPointerMove)
