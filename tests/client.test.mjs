@@ -739,6 +739,89 @@ test('pointercancel aborts the drag cleanly without persisting', async () => {
   window.close()
 })
 
+test('a long touch press opens the context menu and suppresses the trailing click', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const capsule = floatSurface(window)
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const menu = host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]')
+  const down = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 })
+  Object.defineProperty(down, 'pointerType', { value: 'touch' })
+  capsule.dispatchEvent(down)
+  await new Promise((resolve) => setTimeout(resolve, 520))
+  assert.equal(menu.hidden, false, '500ms long press opens the menu (iOS parity for contextmenu)')
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500, button: 0 }))
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, true, 'the trailing click after a long press is suppressed')
+  dispose()
+  window.close()
+})
+
+test('long-press edges: quick tap, movement cancel and mouse stay untouched', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const capsule = floatSurface(window)
+  const panel = host.shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const menu = host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]')
+
+  // Quick tap: up well inside 500ms → click still opens the panel.
+  const tapDown = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 })
+  Object.defineProperty(tapDown, 'pointerType', { value: 'touch' })
+  capsule.dispatchEvent(tapDown)
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500, button: 0 }))
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, false, 'a quick tap keeps the click behavior')
+  assert.equal(menu.hidden, true, 'a quick tap does not open the menu')
+  window.document.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 10, clientY: 10 }))
+  await turn()
+
+  // Movement past the slop cancels the pending long press.
+  const dragDown = new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 })
+  Object.defineProperty(dragDown, 'pointerType', { value: 'touch' })
+  capsule.dispatchEvent(dragDown)
+  const dragMove = new window.MouseEvent('pointermove', { bubbles: true, clientX: 560, clientY: 520 })
+  Object.defineProperty(dragMove, 'pointerType', { value: 'touch' })
+  window.document.dispatchEvent(dragMove)
+  await new Promise((resolve) => setTimeout(resolve, 520))
+  assert.equal(menu.hidden, true, 'movement past the slop cancels the long press')
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 560, clientY: 520, button: 0 }))
+  await turn()
+
+  // Mouse long press does nothing (desktop has the real contextmenu).
+  capsule.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 500, clientY: 500 }))
+  await new Promise((resolve) => setTimeout(resolve, 520))
+  assert.equal(menu.hidden, true, 'mouse presses never trigger the long-press menu')
+  window.document.dispatchEvent(new window.MouseEvent('pointerup', { bubbles: true, clientX: 500, clientY: 500, button: 0 }))
+  dispose()
+  window.close()
+})
+
+test('repeat contextmenu on an open menu is a no-op', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+  const capsule = floatSurface(window)
+  const menu = host.shadowRoot.querySelector('[data-dsh-quota-watch-menu]')
+  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true }))
+  await turn()
+  assert.equal(menu.hidden, false)
+  const first = menu.children[0]
+  // Android fires the native contextmenu after the long-press timer — the
+  // guard must keep the already-open menu untouched (identity, not structure:
+  // a rebuilt menu is structurally identical).
+  capsule.dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true }))
+  await turn()
+  assert.equal(menu.hidden, false)
+  assert.ok(menu.children[0] === first, 'menu children are not rebuilt')
+  dispose()
+  window.close()
+})
+
 test('release snaps to the dock through the animation path when motion is allowed', async () => {
   const window = dom()
   window.localStorage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')

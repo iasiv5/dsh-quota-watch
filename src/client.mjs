@@ -1,7 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
 import { MARGIN, clampPoint, loadFloatDock, loadSurfaceFlags, saveFloatDock, saveSurfaceFlags } from './client/prefs.mjs'
-import { DRAG_SLOP_MOUSE, clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
+import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, LONG_PRESS_MS, clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -490,6 +490,13 @@ export function mountQuotaCard({
     let restX = 0
     let restY = 0
     let lastPoint = null
+    let longPressTimer
+    const clearLongPress = () => {
+      if (longPressTimer !== undefined) {
+        win.clearTimeout(longPressTimer)
+        longPressTimer = undefined
+      }
+    }
     const onPointerDown = (event) => {
       if (event.button !== 0) return
       dragging = true
@@ -498,6 +505,18 @@ export function mountQuotaCard({
       originY = event.clientY
       // Graded slop: touch/pen get 10px so taps win over drags (Task 6).
       slop = dragSlop(event.pointerType)
+      // Long press opens the context menu on touch (iOS has no contextmenu);
+      // movement past the slop cancels it in favor of the drag.
+      clearLongPress()
+      if (slop === DRAG_SLOP_TOUCH) {
+        longPressTimer = win.setTimeout(() => {
+          longPressTimer = undefined
+          if (!dragging || moved) return
+          try { win.navigator.vibrate?.(10) } catch { /* vibration unavailable */ }
+          openMenu()
+          suppressNextClick = true
+        }, LONG_PRESS_MS)
+      }
       const rect = surfaceEl.getBoundingClientRect()
       grab = grabOffset({ x: event.clientX, y: event.clientY }, rect)
       dragSize = rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
@@ -510,6 +529,7 @@ export function mountQuotaCard({
       if (!moved) {
         if (Math.hypot(event.clientX - originX, event.clientY - originY) < slop) return
         moved = true
+        clearLongPress()
         doc.body.style.userSelect = 'none'
         surfaceEl.classList.add('dqw-capsule--dragging')
       }
@@ -534,6 +554,7 @@ export function mountQuotaCard({
     const onPointerUp = (event) => {
       if (!dragging) return
       dragging = false
+      clearLongPress()
       doc.body.style.userSelect = ''
       if (!moved) return
       const viewWidth = win.innerWidth ?? 1024
@@ -573,6 +594,7 @@ export function mountQuotaCard({
     const onPointerCancel = () => {
       if (!dragging) return
       dragging = false
+      clearLongPress()
       doc.body.style.userSelect = ''
       surfaceEl.classList.remove('dqw-capsule--dragging', 'dqw-capsule--snapping')
       surfaceEl.style.transform = ''
@@ -946,6 +968,9 @@ export function mountQuotaCard({
   }
   const onSurfaceContext = (event) => {
     event.preventDefault()
+    // Android fires the native contextmenu right after the long-press timer:
+    // an already-open menu is kept as-is instead of being rebuilt.
+    if (!menu.hidden) return
     openMenu()
   }
   const onMenuClick = (event) => {
