@@ -1254,6 +1254,50 @@ test('0.1.2 regression guards: hidden-attr display rules and 0.0.18 panel sizing
   window.close()
 })
 
+test('a cold mount hides the capsule until data arrives (no empty-capsule flash)', async () => {
+  const window = dom()
+  const fetchImpl = async () => {
+    throw new Error('host routes not ready')
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000, retryNoDataMs: 4 })
+  try {
+    const host = window.document.querySelector('[data-dsh-quota-watch-float]')
+    assert.equal(host.hidden, true, 'a cold shell starts hidden')
+    await turn()
+    assert.equal(host.hidden, true, 'a transport error on a cold client keeps the capsule hidden')
+  } finally {
+    dispose()
+    window.close()
+  }
+})
+
+test('no-data backoff re-polls fast, then returns to the long cadence once data lands', async () => {
+  const window = dom()
+  let calls = 0
+  const loading = snapshot([])
+  const warm = snapshot([glmProvider(), copilotProvider()])
+  const fetchImpl = async (path, init = {}) => {
+    calls += 1
+    return response(calls <= 2 ? loading : warm)
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 400, retryNoDataMs: 4 })
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const fastCount = calls
+    assert.ok(fastCount >= 3, `initial poll plus backoff retries land within 30ms (got ${fastCount})`)
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    const afterData = calls
+    assert.ok(afterData >= fastCount, 'the poll that carries data has run')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+    assert.equal(calls, afterData, 'a warm client stays on the long cadence (no fast retries)')
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    assert.ok(calls > afterData, 'the long cadence fires after its full interval')
+  } finally {
+    dispose()
+    window.close()
+  }
+})
+
 test('the float shell is mounted at most once even without a card', async () => {
   const window = dom({ footless: true })
   const first = await mounted(window, snapshot([glmProvider(), copilotProvider()]))

@@ -311,7 +311,18 @@ export function createQuotaService(ctx, options = {}) {
     timer = setTimeout(async () => {
       timer = undefined
       await refresh()
-      schedule(pollIntervalSec * 1000)
+      // Cold-start retry: until at least one provider has reached ready/stale,
+      // a failed or still-loading round re-arms shortly instead of waiting a
+      // full interval — a desktop cold start with a slow network would
+      // otherwise stare at no capsule for up to a minute. (updatedAt alone
+      // cannot signal "cold": refresh() stamps it even when every probe
+      // failed.) All-'missing' (no credentials configured) and warm states
+      // keep the normal cadence, so nobody without credentials gets
+      // high-frequency probing.
+      const states = [...providers.values()].map((provider) => provider.status)
+      const retryable = states.some((status) => status === 'loading' || status === 'error')
+        && states.every((status) => status !== 'ready' && status !== 'stale')
+      schedule(retryable ? (options.coldRetryMs ?? 5_000) : pollIntervalSec * 1000)
     }, delayMs)
     timer.unref?.()
   }
@@ -321,7 +332,9 @@ export function createQuotaService(ctx, options = {}) {
     refresh,
     start() {
       if (disposed || timer !== undefined) return
-      schedule(2_000)
+      // Routes register synchronously in apply() before start(), so probing
+      // immediately is safe; the legacy 2s delay only padded the cold start.
+      schedule(0)
     },
     stop() {
       disposed = true

@@ -373,6 +373,8 @@ export function mountQuotaCard({
   win = globalThis.window,
   fetchImpl = globalThis.fetch,
   pollIntervalMs = CLIENT_POLL_INTERVAL_MS,
+  retryNoDataMs = 2_000,
+  retryBackoff = 2,
 } = {}) {
   if (!doc?.body || typeof fetchImpl !== 'function') return () => {}
   if (doc.querySelector(CARD_SELECTOR) || doc.querySelector(FLOAT_SELECTOR)) return () => {}
@@ -610,11 +612,15 @@ export function mountQuotaCard({
   let snapshot
   let requestSequence = 0
   let timer
+  let noDataRetries = 0
   let disposed = false
   let queuedPlace = false
   let openKey
   let panelNav = false
-  let dataHidden = false
+  // Cold until the first successful render: a mount whose first poll fails or
+  // stalls must behave like the documented no-data state (hidden shell, fast
+  // retries), not like a warm client showing an empty capsule.
+  let dataHidden = true
   let surfaceFlags = loadSurfaceFlags(win.localStorage)
   const setCardHidden = (hidden) => {
     surfaceFlags = { cardHidden: hidden }
@@ -1052,6 +1058,18 @@ export function mountQuotaCard({
       if (sequence === requestSequence && !disposed) render(next)
     } catch {
       if (sequence === requestSequence && !disposed) showTransportError()
+    } finally {
+      // Self-scheduling chain (replaces the fixed interval): every completed
+      // poll — success OR transport error — arms the next one, so the no-data
+      // backoff also covers a cold start whose first request fails outright.
+      // timer === undefined guards against a concurrent force poll forking a
+      // second chain; the already-armed timer keeps the cadence.
+      if (timer === undefined && sequence === requestSequence && !disposed && doc.visibilityState !== 'hidden') {
+        timer = win.setTimeout(() => {
+          timer = undefined
+          if (!disposed && doc.visibilityState !== 'hidden') void poll()
+        }, nextPollDelay())
+      }
     }
   }
 
@@ -1091,15 +1109,33 @@ export function mountQuotaCard({
     ? new win.MutationObserver(() => { if (!disposed) renderAll() })
     : null
   langObserver?.observe(doc.documentElement, { attributeFilter: ['lang'] })
+  // Cold until data lands: keep the shell hidden so a slow or failed first
+  // probe never flashes an empty capsule (startPolling arms the retry chain).
+  syncFloatVisibility()
   place()
 
+  /** Cold-start cadence: while no provider has rendered any data, re-poll on
+   * a shortening backoff (retryNoDataMs × retryBackoffⁿ, capped at
+   * pollIntervalMs) so a desktop cold start surfaces the capsule in seconds
+   * instead of waiting out the fixed interval. A successful render resets the
+   * chain to the normal cadence; a transport error keeps the previous
+   * dataHidden state, so a cold client keeps retrying fast and a warm one
+   * stays calm. */
+  const nextPollDelay = () => {
+    if (!dataHidden) {
+      noDataRetries = 0
+      return pollIntervalMs
+    }
+    const delay = retryNoDataMs * (retryBackoff ** noDataRetries)
+    noDataRetries += 1
+    return Math.min(delay, pollIntervalMs)
+  }
   const startPolling = () => {
     if (timer !== undefined || doc.visibilityState === 'hidden' || disposed) return
     void poll()
-    timer = win.setInterval(() => { void poll() }, pollIntervalMs)
   }
   const stopPolling = () => {
-    if (timer !== undefined) win.clearInterval(timer)
+    if (timer !== undefined) win.clearTimeout(timer)
     timer = undefined
   }
   const onVisibilityChange = () => {

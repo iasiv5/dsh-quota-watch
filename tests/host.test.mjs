@@ -229,3 +229,72 @@ test('loopback access requires a loopback socket and ignores forwarded address h
   }, spoofed)
   assert.equal(spoofed.statusCode, 403)
 })
+
+test('cold start probes immediately, retries fast while failing, and warms to the normal cadence', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  // A completed refresh() is several awaits deep; setImmediate is NOT mocked,
+  // so a few immediate hops flush the probe chain before assertions.
+  const flush = async () => {
+    for (let hop = 0; hop < 8; hop += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  let attempts = 0
+  const context = makeContext()
+  const fetchImpl = async (url) => {
+    attempts += 1
+    if (attempts <= 4) throw new Error('network not ready yet')
+    return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const service = createQuotaService(context, { fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
+  try {
+    service.start()
+    t.mock.timers.tick(0)
+    await flush()
+    assert.equal(attempts, 2, 'start() probes both providers immediately (no legacy 2s padding)')
+    t.mock.timers.tick(5_000)
+    await flush()
+    assert.equal(attempts, 4, 'a failed cold round re-probes at the short cold interval')
+    t.mock.timers.tick(5_000)
+    await flush()
+    assert.equal(attempts, 7, 'the recovering round succeeds (glm plan + glm usage + copilot)')
+    const overview = service.overview()
+    assert.equal(overview.providers.find((provider) => provider.key === 'glm').status, 'ready')
+    t.mock.timers.tick(5_000)
+    await flush()
+    assert.equal(attempts, 7, 'a warm service ignores the cold interval')
+    t.mock.timers.tick(60_000)
+    await flush()
+    assert.equal(attempts, 10, 'a warm service probes on the normal cadence (3 hops per round)')
+  } finally {
+    service.stop()
+    t.mock.timers.reset()
+  }
+})
+
+test('without credentials the cold interval never engages (no high-frequency probing)', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const flush = async () => {
+    for (let hop = 0; hop < 8; hop += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  let attempts = 0
+  const context = makeContext({ glmKey: '', githubOAuth: '' })
+  const fetchImpl = async (url) => {
+    attempts += 1
+    return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  const service = createQuotaService(context, { fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
+  try {
+    service.start()
+    t.mock.timers.tick(0)
+    await flush()
+    assert.equal(attempts, 0, 'missing credentials probe nothing')
+    t.mock.timers.tick(5_000)
+    await flush()
+    assert.equal(attempts, 0, 'all-missing providers do not trigger the cold fast retry')
+    t.mock.timers.tick(60_000)
+    await flush()
+    assert.equal(attempts, 0, 'the normal cadence re-checks credentials without network calls')
+  } finally {
+    service.stop()
+    t.mock.timers.reset()
+  }
+})
