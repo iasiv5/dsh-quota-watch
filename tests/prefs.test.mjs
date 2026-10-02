@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  FLOAT_DOCK_KEY,
+  FLOAT_POSITION_KEY,
   SURFACE_FLAGS_KEY,
   clampPoint,
-  loadFloatDock,
-  saveFloatDock,
+  loadFloatPosition,
+  saveFloatPosition,
   loadSurfaceFlags,
   saveSurfaceFlags,
 } from '../src/client/prefs.mjs'
@@ -43,35 +43,30 @@ test('surface flags default to card hidden (capsule-first) and survive corruptio
   assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: false })
 })
 
-// --- float-dock API (0.1.11 capsule-polish, Task 2) ---
+// --- float-position API (0.1.12 free-positioning) ---
 
-test('loadFloatDock returns null for missing/corrupt/invalid values and round-trips valid ones', () => {
+test('loadFloatPosition returns null for missing/corrupt/invalid values and round-trips valid ones', () => {
   const storage = storageStub()
-  assert.equal(loadFloatDock(storage), null)
-  storage.setItem(FLOAT_DOCK_KEY, '')
-  assert.equal(loadFloatDock(storage), null)
-  storage.setItem(FLOAT_DOCK_KEY, '{')
-  assert.equal(loadFloatDock(storage), null)
-  storage.setItem(FLOAT_DOCK_KEY, '{"edge":"top","offsetY":1}')
-  assert.equal(loadFloatDock(storage), null)
-  storage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":"a"}')
-  assert.equal(loadFloatDock(storage), null)
-  storage.setItem(FLOAT_DOCK_KEY, '{"edge":"right"}')
-  assert.equal(loadFloatDock(storage), null)
-  storage.setItem(FLOAT_DOCK_KEY, '{"edge":"left","offsetY":80}')
-  assert.deepEqual(loadFloatDock(storage), { edge: 'left', offsetY: 80 })
-  storage.setItem(FLOAT_DOCK_KEY, '{"edge":"right","offsetY":120.5}')
-  assert.deepEqual(loadFloatDock(storage), { edge: 'right', offsetY: 120.5 })
+  assert.equal(loadFloatPosition(storage), null)
+  storage.setItem(FLOAT_POSITION_KEY, '')
+  assert.equal(loadFloatPosition(storage), null)
+  storage.setItem(FLOAT_POSITION_KEY, '{')
+  assert.equal(loadFloatPosition(storage), null)
+  storage.setItem(FLOAT_POSITION_KEY, '{"x":"a","y":1}')
+  assert.equal(loadFloatPosition(storage), null)
+  storage.setItem(FLOAT_POSITION_KEY, '{"x":100}')
+  assert.equal(loadFloatPosition(storage), null)
+  storage.setItem(FLOAT_POSITION_KEY, '{"x":120,"y":80}')
+  assert.deepEqual(loadFloatPosition(storage), { x: 120, y: 80 })
 })
 
-test('saveFloatDock rejects invalid docks with TypeError and persists valid ones', () => {
+test('saveFloatPosition rejects invalid coordinates with TypeError and persists valid ones', () => {
   const storage = storageStub()
-  assert.throws(() => saveFloatDock(storage, { edge: 'top', offsetY: 0 }), TypeError)
-  assert.throws(() => saveFloatDock(storage, { edge: 'left', offsetY: NaN }), TypeError)
-  assert.throws(() => saveFloatDock(storage, { edge: 'left', offsetY: 'a' }), TypeError)
-  assert.throws(() => saveFloatDock(storage, null), TypeError)
-  saveFloatDock(storage, { edge: 'left', offsetY: 42 })
-  assert.equal(storage.getItem(FLOAT_DOCK_KEY), '{"edge":"left","offsetY":42}')
+  assert.throws(() => saveFloatPosition(storage, { x: NaN, y: 0 }), TypeError)
+  assert.throws(() => saveFloatPosition(storage, { x: 10, y: 'a' }), TypeError)
+  assert.throws(() => saveFloatPosition(storage, null), TypeError)
+  saveFloatPosition(storage, { x: 250, y: 150 })
+  assert.equal(storage.getItem(FLOAT_POSITION_KEY), '{"x":250,"y":150}')
 })
 
 test('clampPoint accepts a {width,height} element size', () => {

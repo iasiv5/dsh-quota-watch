@@ -1,7 +1,7 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { MARGIN, clampPoint, loadFloatDock, loadSurfaceFlags, saveFloatDock, saveSurfaceFlags } from './client/prefs.mjs'
-import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, LONG_PRESS_MS, parseInset, clampFrame, dockX, dragSlop, grabOffset, releaseDock } from './client/drag.mjs'
+import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags } from './client/prefs.mjs'
+import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, LONG_PRESS_MS, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
 export const inject = []
@@ -134,7 +134,6 @@ const FLOAT_STYLE_TEXT = `
 @media (prefers-reduced-motion: no-preference) {
   .dqw-capsule[data-alert] { animation: dqw-pulse 1.6s ease-in-out infinite; }
   .dqw-capsule { transition: border-color .12s ease-out, box-shadow .12s ease-out; }
-  .dqw-capsule--snapping { transition: transform 150ms cubic-bezier(.2,.8,.2,1); }
 }
 @media print { :host { display: none !important; } }
 @keyframes dqw-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.06); } }
@@ -442,23 +441,21 @@ export function mountQuotaCard({
     const rect = surface.getBoundingClientRect()
     return rect.width > 0 ? { width: rect.width, height: rect.height } : FALLBACK_SIZE
   }
-  /** Rest position = docked edge + persisted offsetY; x is always derived (ADR 0002). */
-  const applyDock = () => {
+  /** Position = user preferred {x, y} clamped to viewport & safe-area insets. */
+  const applyPosition = () => {
     const viewWidth = win.innerWidth ?? 1024
     const viewHeight = win.innerHeight ?? 768
     const viewport = { width: viewWidth, height: viewHeight }
     const size = measureSurface()
-    const dock = loadFloatDock(win.localStorage) ?? {
-      edge: 'right',
-      offsetY: viewHeight - MARGIN - size.height,
-    }
-    // Deliberately NOT persisted here: a window that starts small (Electron
-    // restore, split-screen) must not clobber the user's stored dock — storage
-    // updates on drag release only; this is the visual clamp.
     const insets = readInsets()
-    const top = clampPoint({ x: 0, y: dock.offsetY }, viewport, size, insets).y
-    floatHost.style.left = `${Math.round(dockX(dock.edge, size.width, viewport, insets))}px`
-    floatHost.style.top = `${Math.round(top)}px`
+    const pos = loadFloatPosition(win.localStorage) ?? {
+      x: viewWidth - MARGIN - insets.right - size.width,
+      y: viewHeight - MARGIN - insets.bottom - size.height,
+    }
+    // Clamped visually so a restored or shrunk window never lets the capsule fall outside.
+    const point = clampPoint(pos, viewport, size, insets)
+    floatHost.style.left = `${Math.round(point.x)}px`
+    floatHost.style.top = `${Math.round(point.y)}px`
   }
   // Safe-area probe: env() insets ride computed padding; jsdom reports '' which
   // parseInset normalizes to 0, so tests without a stub see zero insets.
@@ -480,7 +477,7 @@ export function mountQuotaCard({
       return ZERO_INSETS
     }
   }
-  applyDock()
+  applyPosition()
   // Panel lives inside the float shadow root from now on (契约总表「归属时序」).
   floatRoot.append(panel)
   const menu = doc.createElement('div')
@@ -581,11 +578,11 @@ export function mountQuotaCard({
         surfaceEl.style.transform = `translate3d(${Math.round(dx)}px, ${Math.round(dy)}px, 0) scale(1.03)`
       })
     }
-    const finishDragRelease = (dock) => {
-      surfaceEl.classList.remove('dqw-capsule--dragging', 'dqw-capsule--snapping')
+    const finishDragRelease = (point) => {
+      surfaceEl.classList.remove('dqw-capsule--dragging')
       surfaceEl.style.transform = ''
-      saveFloatDock(win.localStorage, dock)
-      applyDock()
+      saveFloatPosition(win.localStorage, point)
+      applyPosition()
       suppressNextClick = true
     }
     const onPointerUp = (event) => {
@@ -599,52 +596,25 @@ export function mountQuotaCard({
       const viewHeight = win.innerHeight ?? 768
       const insets = readInsets()
       const viewport = { width: viewWidth, height: viewHeight }
-      const dock = releaseDock(
+      const point = clampFrame(
         { x: event.clientX, y: event.clientY },
         grab,
         dragSize,
         viewport,
         insets,
       )
-      // The real click lands within ms of pointerup — suppression is armed
-      // synchronously here, never deferred to the animation's settle (E1-2).
       suppressNextClick = true
-      // jsdom has no matchMedia: the typeof guard keeps the release working
-      // (direct commit) where the motion query cannot be asked at all.
-      const motionAllowed = typeof win.matchMedia === 'function'
-        && win.matchMedia('(prefers-reduced-motion: no-preference)').matches
-      if (motionAllowed) {
-        surfaceEl.classList.remove('dqw-capsule--dragging')
-        surfaceEl.classList.add('dqw-capsule--snapping')
-        // Animate toward the NEW dock (delta from rest) — the host still sits
-        // at the old dock until settle commits it, so (0,0) would slide the
-        // pill backwards first and then teleport (E1-1).
-        const targetLeft = dockX(dock.edge, dragSize.width, viewport, insets)
-        surfaceEl.style.transform = `translate3d(${Math.round(targetLeft - restX)}px, ${Math.round(dock.offsetY - restY)}px, 0) scale(1)`
-        let settled = false
-        let snapTimer
-        const settle = () => {
-          if (settled || disposed) return
-          settled = true
-          surfaceEl.removeEventListener('transitionend', settle)
-          win.clearTimeout(snapTimer)
-          finishDragRelease(dock)
-        }
-        surfaceEl.addEventListener('transitionend', settle)
-        snapTimer = win.setTimeout(settle, 200)
-      } else {
-        finishDragRelease(dock)
-      }
+      finishDragRelease(point)
     }
     /** A canceled pointer (scroll takeover, incoming call, palm) resets the
-     * gesture: no dock is persisted and the trailing click stays allowed. */
+     * gesture: no position is persisted and the trailing click stays allowed. */
     const onPointerCancel = () => {
       if (!dragging) return
       dragging = false
       clearLongPress()
       unbindGesture()
       doc.body.style.userSelect = ''
-      surfaceEl.classList.remove('dqw-capsule--dragging', 'dqw-capsule--snapping')
+      surfaceEl.classList.remove('dqw-capsule--dragging')
       surfaceEl.style.transform = ''
     }
     surfaceEl.addEventListener('pointerdown', onPointerDown)
@@ -977,9 +947,7 @@ export function mountQuotaCard({
     const label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
     surface.setAttribute('aria-label', label)
     surface.title = label
-    // Re-derive the docked x every render: the pill's width follows its text,
-    // and the stored dock only knows the edge, not the pixel (ADR 0002).
-    applyDock()
+    applyPosition()
   }
 
   const onSurfaceClick = () => {
@@ -1224,7 +1192,7 @@ export function mountQuotaCard({
   const onWinResize = () => {
     placePanel()
     syncCardVisibility()
-    applyDock()
+    applyPosition()
   }
   const onDocKeydown = (event) => {
     if (event.key !== 'Escape') return

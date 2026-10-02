@@ -1,7 +1,7 @@
 // Float-shell preferences for @iasiv5/dsh-quota-watch.
 // Pure logic: no DOM. `storage` is a localStorage-like object (getItem/setItem).
 
-export const FLOAT_DOCK_KEY = 'dsh-quota-watch:float-dock'
+export const FLOAT_POSITION_KEY = 'dsh-quota-watch:float-position'
 export const SURFACE_FLAGS_KEY = 'dsh-quota-watch:surface-flags'
 
 export const MARGIN = 8
@@ -31,40 +31,38 @@ export function clampPoint(point, viewport, size = 0, insets = ZERO_INSETS) {
   }
 }
 
-const DOCK_EDGES = new Set(['left', 'right'])
-
-export function loadFloatDock(storage) {
+export function loadFloatPosition(storage) {
   try {
-    const raw = storage.getItem(FLOAT_DOCK_KEY)
+    const raw = storage.getItem(FLOAT_POSITION_KEY)
     if (typeof raw !== 'string' || raw === '') return null
     const parsed = JSON.parse(raw)
     if (
       typeof parsed !== 'object' ||
       parsed === null ||
-      !DOCK_EDGES.has(parsed.edge) ||
-      !Number.isFinite(parsed.offsetY)
+      !Number.isFinite(parsed.x) ||
+      !Number.isFinite(parsed.y)
     ) {
       return null
     }
-    return { edge: parsed.edge, offsetY: parsed.offsetY }
+    return { x: parsed.x, y: parsed.y }
   } catch {
     return null
   }
 }
 
-export function saveFloatDock(storage, dock) {
+export function saveFloatPosition(storage, point) {
   if (
-    typeof dock !== 'object' ||
-    dock === null ||
-    !DOCK_EDGES.has(dock.edge) ||
-    !Number.isFinite(dock.offsetY)
+    typeof point !== 'object' ||
+    point === null ||
+    !Number.isFinite(point.x) ||
+    !Number.isFinite(point.y)
   ) {
-    throw new TypeError(`invalid float dock: ${JSON.stringify(dock)}`)
+    throw new TypeError(`invalid float position: ${JSON.stringify(point)}`)
   }
   try {
-    storage.setItem(FLOAT_DOCK_KEY, JSON.stringify({ edge: dock.edge, offsetY: dock.offsetY }))
+    storage.setItem(FLOAT_POSITION_KEY, JSON.stringify({ x: point.x, y: point.y }))
   } catch {
-    /* storage unavailable; dock stays session-only */
+    /* storage unavailable; position stays session-only */
   }
 }
 

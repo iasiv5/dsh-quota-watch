@@ -6,10 +6,8 @@ import {
   LONG_PRESS_MS,
   clampFrame,
   dragSlop,
-  dockX,
   grabOffset,
   parseInset,
-  releaseDock,
 } from '../src/client/drag.mjs'
 
 const ZERO_INSETS = { left: 0, right: 0, top: 0, bottom: 0 }
@@ -32,32 +30,13 @@ test('grabOffset keeps the grab point under the cursor', () => {
   assert.deepEqual(grabOffset({ x: 100, y: 50 }, rect), { dx: 20, dy: 10 })
 })
 
-test('clampFrame clamps the pill top-left during the gesture', () => {
+test('clampFrame clamps the pill top-left during the gesture and on release', () => {
   const point = { x: -50, y: 9999 }
   const grab = { dx: 20, dy: 10 }
   const size = { width: 120, height: 26 }
   assert.deepEqual(clampFrame(point, grab, size, { width: 800, height: 600 }, ZERO_INSETS), { x: 8, y: 566 })
-})
-
-test('releaseDock picks the edge by the pill center and clamps the vertical offset', () => {
-  const size = { width: 120, height: 26 }
-  const grab = { dx: 0, dy: 0 }
-  assert.deepEqual(releaseDock({ x: 210, y: 100 }, grab, size, { width: 400, height: 800 }, ZERO_INSETS), {
-    edge: 'right',
-    offsetY: 100,
-  })
-  assert.deepEqual(releaseDock({ x: 30, y: 40 }, grab, size, { width: 400, height: 800 }, ZERO_INSETS), {
-    edge: 'left',
-    offsetY: 40,
-  })
-  assert.equal(releaseDock({ x: 210, y: 9999 }, grab, size, { width: 400, height: 800 }, ZERO_INSETS).offsetY, 766)
-})
-
-test('dockX derives the resting x from the edge, measured width and insets', () => {
-  assert.equal(dockX('left', 120, { width: 400, height: 800 }, ZERO_INSETS), 8)
-  assert.equal(dockX('right', 120, { width: 400, height: 800 }, ZERO_INSETS), 272)
-  assert.equal(dockX('left', 120, { width: 400, height: 800 }, { left: 20, right: 10, top: 0, bottom: 0 }), 28)
-  assert.equal(dockX('right', 120, { width: 400, height: 800 }, { left: 20, right: 10, top: 0, bottom: 0 }), 262)
+  // Normal in-bounds point maintains exact position offset
+  assert.deepEqual(clampFrame({ x: 300, y: 200 }, { dx: 50, dy: 10 }, size, { width: 800, height: 600 }, ZERO_INSETS), { x: 250, y: 190 })
 })
 
 test('parseInset normalizes computed safe-area values to numbers', () => {
