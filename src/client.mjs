@@ -922,11 +922,19 @@ export function mountQuotaCard({
     container.hidden = !showCard && !showRail
     if (showRail) container.dataset.dshQuotaWatchSidebarCollapsed = ''
     else delete container.dataset.dshQuotaWatchSidebarCollapsed
-    // The card ↔ rail swap is driven by INLINE styles: know-how 017's lesson —
-    // critical visibility state must not depend on stylesheet rules that
-    // external actors (aggressive extensions) may neuter in the user's browser.
+    // The card ↔ rail swap is driven by INLINE styles (know-how 017's lesson),
+    // AND the collapsed rail gets an explicit 38px box: CDP layout-chain dump
+    // showed the 0.2.0 framework flex-collapsing unknown foot children to 0px
+    // height, so the gauge must opt out of the flex squeeze to be visible.
     card.style.display = showCard ? '' : 'none'
     railTrigger.style.display = showRail ? 'inline-flex' : 'none'
+    if (showRail) {
+      container.style.height = SURFACE_SIZE + 'px'
+      container.style.flex = '0 0 auto'
+    } else {
+      container.style.height = ''
+      container.style.flex = ''
+    }
   }
   const footResizeObserver = typeof win.ResizeObserver === 'function'
     ? new win.ResizeObserver(() => { syncCardVisibility() })

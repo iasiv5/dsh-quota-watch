@@ -960,6 +960,8 @@ test('a narrow foot swaps the card for the rail gauge without any collapse attri
   await turn()
   assert.equal(container.hidden, false, 'rail mode keeps the host visible (the shadow CSS swaps card ↔ gauge)')
   assert.equal(container.dataset.dshQuotaWatchSidebarCollapsed, '', 'collapsed/narrow state exposed to the shadow CSS')
+  assert.equal(container.style.height, '38px', 'collapsed rail gets an explicit 38px box (framework flex-collapses unknown children to 0px)')
+  assert.equal(rail.style.display, 'inline-flex', 'rail gauge inline-forced visible')
   assert.ok(rail, 'rail gauge exists (visibility handled by the shadow CSS)')
   Object.defineProperty(foot, 'clientWidth', { configurable: true, value: 400 })
   window.dispatchEvent(new window.Event('resize'))
