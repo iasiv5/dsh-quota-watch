@@ -39,20 +39,16 @@ GLM 详情（双大数字 + 窗口网格 + 分模型用量）与 Copilot 详情�
 
 ## 🚀 安装
 
-安装到 `web` profile：
+**方式一（推荐）· DSH 插件市场（dsh-m）**：打开 DSH 侧栏的「插件市场」，搜索 **Quota Watch**（或「额度」）一键安装——市场锁定精确版本、自动处理依赖，后续升级也在市场里完成。
+
+**方式二 · 命令行**（无市场环境或脚本化装机）：
 
 ```sh
-dsh plugin --profile web add @iasiv5/dsh-quota-watch
+dsh plugin --profile web add @iasiv5/dsh-quota-watch      # web profile
+dsh plugin --profile desktop add @iasiv5/dsh-quota-watch  # desktop profile
 ```
 
-更新与卸载：
-
-```sh
-dsh plugin --profile web update @iasiv5/dsh-quota-watch   # 更新
-dsh plugin --profile web remove @iasiv5/dsh-quota-watch   # 卸载
-```
-
-插件管理器会应用包内 `cordis.patch.yml`。宿主半区的插件变更需要重启 `dsh web` 后生效；客户端 bundle 随插件加载。装好后刷新页面，右下角即是额度胶囊。禁用插件请使用 DSH 插件管理器。
+**web 与 desktop 两种 profile 均已适配**：悬浮胶囊在两端都是常驻入口；侧边栏卡片是渐进增强——只要侧栏底部区块存在即可从面板按钮开启，侧栏收起或不存在（Desktop 收起态）时自动缺席。插件管理器会应用包内 `cordis.patch.yml`；宿主半区的变更需要重启 DSH 后生效（web 重启 `dsh web` 服务，desktop 重启应用），客户端 bundle 随插件加载，装好后刷新页面，右下角即是额度胶囊。npm 发布新版本后，市场 / 镜像同步可能略有延迟，立即装不到最新版时稍候重试即可。禁用插件请使用 DSH 插件管理器。
 
 ## ⚙️ 配置
 
