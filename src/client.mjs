@@ -153,6 +153,11 @@ const FLOAT_STYLE_TEXT = `
 .dqw-panel { position: fixed; z-index: 2147483000; min-width: 166px; max-width: min(320px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow-y: auto; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.35)); border-radius: 10px; background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); background: color-mix(in srgb, var(--dsw-alias-bg-base, #1f1f1f) 86%, transparent); -webkit-backdrop-filter: blur(14px) saturate(1.3); backdrop-filter: blur(14px) saturate(1.3); box-shadow: 0 8px 24px rgba(0,0,0,.25); color: var(--dsw-alias-label-primary, inherit); display: flex; flex-direction: column; gap: 8px; font: inherit; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) { .dqw-panel { background: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-base, #1f1f1f)); } }
 .dqw-panel--sheet { left:8px; right:8px; top:auto; bottom:calc(8px + env(safe-area-inset-bottom, 0px)); width:auto; max-width:none; max-height:calc(100dvh - 24px); }
+/* Overview-only pin: the capsule pop matches the sidebar card (240px); detail
+   views (GLM/Copilot) keep the 0.0.18 content-driven width above. :not() keeps
+   the bottom sheet (≤480px) winning over the pin. Keyed off the data attr that
+   syncPop already maintains — no JS state change. */
+.dqw-panel[data-dsh-quota-watch-panel-overview]:not(.dqw-panel--sheet) { width: min(240px, calc(100vw - 24px)); }
 .dqw-panel[hidden] { display: none; }
 .dqw-panel *, .dqw-panel *::before, .dqw-panel *::after { box-sizing: border-box; }
 .dqw-panel-header { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -172,7 +177,7 @@ const FLOAT_STYLE_TEXT = `
 .dqw-label { font-size: 11px; font-weight: 600; width: 52px; flex: none; }
 .dqw-label[data-action="refresh"] { cursor: pointer; border-radius: 4px; }
 .dqw-label[data-action="refresh"]:hover { opacity: .75; }
-.dqw-bar { display: block; flex: 0 0 auto; width: 100px; height: 4px; overflow: hidden; border-radius: 4px; background: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); }
+.dqw-bar { display: block; flex: 1 1 auto; width: auto; min-width: 36px; height: 4px; overflow: hidden; border-radius: 4px; background: var(--dsw-alias-bg-tertiary, rgba(128,128,128,.2)); }
 .dqw-bar-fill { display: block; height: 100%; border-radius: inherit; background: var(--dsw-alias-button-primary-fill, #5b8def); }
 .dqw-bar-fill.warn { background: var(--dsw-alias-label-warning, #d29922); }
 .dqw-bar-fill.danger { background: var(--dsw-alias-label-danger, #c93c3c); }
@@ -193,7 +198,7 @@ const FLOAT_STYLE_TEXT = `
 .dqw-kv { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
 .dqw-kv-label { flex: none; opacity: .65; }
 .dqw-kv-value { min-width: 0; text-align: right; font-weight: 600; }
-.dqw-kv-sub { font-weight: 400; opacity: .55; }
+.dqw-kv-sub { min-width: 0; overflow-wrap: anywhere; font-weight: 400; opacity: .55; }
 .dqw-wins { display: grid; grid-template-columns: max-content max-content max-content max-content 1fr; column-gap: 6px; row-gap: 3px; align-items: baseline; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
 .dqw-win-name { opacity: .65; }
 .dqw-win-mid { opacity: .65; white-space: nowrap; }

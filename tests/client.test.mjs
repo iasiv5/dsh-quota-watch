@@ -409,6 +409,7 @@ test('capsule click toggles the overview panel with 0.0.18-style summary rows', 
   await turn()
   assert.equal(panel.hidden, false)
   assert.notEqual(panel.dataset.dshQuotaWatchPanelOverview, undefined, 'capsule opens the overview')
+  assert.equal(panel.dataset.dshQuotaWatchPanelDetail, undefined, 'overview state carries no detail marker (width pin keys off this attr)')
   assert.equal(capsule.getAttribute('aria-expanded'), 'true')
   assert.ok(panel.style.left, 'panel positions beside the capsule')
   const glmRow = panel.querySelector('[data-dsh-quota-watch-row="glm"]')
@@ -420,6 +421,7 @@ test('capsule click toggles the overview panel with 0.0.18-style summary rows', 
   glmRow.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   assert.equal(panel.dataset.dshQuotaWatchPanelDetail, 'glm', 'overview row opens the detail')
+  assert.equal(panel.dataset.dshQuotaWatchPanelOverview, undefined, 'detail state drops the overview width pin (0.0.18 width strategy applies)')
   assert.ok(panel.querySelector('[data-action="back-to-overview"]'), 'panel nav shows the back affordance')
   capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
@@ -1329,7 +1331,7 @@ test('collapsed web rail hides the card even when opted in; the capsule keeps th
   window.close()
 })
 
-test('0.1.2 regression guards: hidden-attr display rules and 0.0.18 panel sizing', async () => {
+test('0.1.2 regression guards: hidden-attr display rules and 240px panel sizing', async () => {
   const window = dom()
   const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
   const container = window.document.querySelector('[data-dsh-quota-watch-card]')
@@ -1337,9 +1339,9 @@ test('0.1.2 regression guards: hidden-attr display rules and 0.0.18 panel sizing
   const cardStyle = container.shadowRoot.querySelector('style').textContent
   assert.match(floatStyle, /\.dqw-capsule\[hidden\]\s*{\s*display: none/, 'a hidden capsule must actually disappear (author display beats the UA [hidden] rule)')
   assert.match(cardStyle, /@media print\s*{\s*:host { display: none !important; }/, 'card hides in print')
-  assert.match(floatStyle, /min-width: 166px/, 'panel width strategy matches the 0.0.18 pop (content-driven, capped)')
-  assert.doesNotMatch(floatStyle, /max-width: 240px/, 'overview rows keep the 0.0.18 full-row width (bars ≈112px)')
-  assert.match(floatStyle, /\.dqw-bar { display: block; flex: 0 0 auto; width: 100px;/, 'panel bars match the sidebar card bar length')
+  assert.match(floatStyle, /\.dqw-panel\[data-dsh-quota-watch-panel-overview\]:not\(\.dqw-panel--sheet\) { width: min\(240px, calc\(100vw - 24px\)\)/, 'overview pin matches the sidebar card (240px); :not keeps the bottom sheet full-width')
+  assert.match(floatStyle, /\.dqw-panel { position: fixed; z-index: 2147483000; min-width: 166px; max-width: min\(320px, calc\(100vw - 24px\)\)/, 'detail views keep the 0.0.18 content-driven width (capped at 320px)')
+  assert.match(floatStyle, /\.dqw-bar { display: block; flex: 1 1 auto; width: auto; min-width: 36px;/, 'panel bars flex like the sidebar card so the 240px overview fits rows')
   assert.match(cardStyle, /\.dqw-bar { display: block; flex: 1;/, 'card rows keep the adaptive flex bar')
   assert.match(cardStyle, /@media print\s*{\s*:host { display: none !important; }/, 'card hides in print')
   dispose()
