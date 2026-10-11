@@ -1524,3 +1524,92 @@ test('panel keeps its position across row re-renders and scrolls', async () => {
   dispose()
   window.close()
 })
+
+test('domestic reset section stays three lines, shows Beijing expiry, and persists disclosure only', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const data = { ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
+    autoReset: { fiveHour: { enabled: false, threshold: 99.9 }, week: { enabled: true, threshold: 99.9 } } }
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    requests.push({ path, method: init.method ?? 'GET' })
+    return response(String(path).endsWith('/reset-cards')
+      ? { ok: true, cards: { fiveHour: [], week: [
+        { recordId: 2, expireTime: '2026-11-01 09:00:00' },
+        { recordId: 1, expireTime: '2026-01-02 00:30:00' },
+      ] } }
+      : data)
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  await turn()
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  await turn()
+  assert.match(panel.textContent, /额度重置卡（刷新）/)
+  const cardRows = [...panel.querySelectorAll('.dqw-reset-row')]
+  assert.equal(cardRows.length, 2)
+  assert.equal(cardRows[0].querySelector('.dqw-reset-kind').textContent, '5 小时重置卡')
+  assert.equal(cardRows[1].querySelector('.dqw-reset-kind').textContent, '每周重置卡')
+  assert.deepEqual(cardRows.map((row) => row.querySelector('.dqw-reset-mid').textContent), ['·', '·'])
+  assert.equal(cardRows[1].querySelector('.dqw-reset-expiry').textContent, '01/02 前有效')
+  assert.ok(panel.querySelector('.dqw-reset-lines'), 'both rows share one alignment grid')
+  assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1, 'empty type has no button')
+  assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 0, 'auto controls default collapsed')
+  assert.match(panel.querySelector('.dqw-auto-master').textContent, /已启用/)
+  panel.querySelector('.dqw-auto-master input').click()
+  await turn()
+  assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 2)
+  assert.equal(window.localStorage.getItem('dsh-quota-watch:auto-open'), '1')
+  assert.equal(requests.filter((call) => call.method === 'POST').length, 0, 'disclosure never arms either window')
+  dispose()
+  const remount = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  await turn()
+  const restoredPanel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  restoredPanel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  await turn()
+  assert.equal(restoredPanel.querySelectorAll('.dqw-auto-row').length, 2, 'disclosure expansion survives remount')
+  remount()
+  window.close()
+})
+
+test('international GLM detail omits domestic reset section and never lists cards', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const requests = []
+  const fetchImpl = async (path) => { requests.push(String(path)); return response(snapshot([glmProvider({ providerId: 'zai' }), copilotProvider()])) }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  await turn()
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.querySelector('.dqw-reset'), null)
+  assert.equal(requests.some((path) => path.endsWith('/reset-cards')), false)
+  dispose()
+  window.close()
+})
+
+test('English reset heading and refresh control use the updated quota terminology', async () => {
+  const window = dom({ locale: 'en-US' })
+  const data = snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()])
+  const fetchImpl = async (path) => response(String(path).endsWith('/reset-cards')
+    ? { ok: true, cards: { fiveHour: [], week: [] } } : data)
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  await turn()
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  await turn()
+  assert.equal(panel.querySelector('.dqw-reset-title').textContent, 'Quota reset cards')
+  assert.equal(panel.querySelector('.dqw-reset-reload').textContent, '(Refresh)')
+  assert.ok(panel.querySelector('.dqw-reset-head-left.is-en'))
+  dispose()
+  window.close()
+})

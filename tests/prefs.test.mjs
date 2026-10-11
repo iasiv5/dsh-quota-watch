@@ -3,6 +3,9 @@ import assert from 'node:assert/strict'
 import {
   FLOAT_POSITION_KEY,
   SURFACE_FLAGS_KEY,
+  AUTO_OPEN_KEY,
+  loadAutoOpen,
+  saveAutoOpen,
   clampPoint,
   loadFloatPosition,
   saveFloatPosition,
@@ -42,6 +45,18 @@ test('surface flags default to card hidden (capsule-first) and survive corruptio
   assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: true })
   saveSurfaceFlags(storage, { cardHidden: false })
   assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: false })
+})
+
+test('auto-use disclosure defaults closed, persists only visibility and tolerates storage errors', () => {
+  const storage = storageStub()
+  assert.equal(loadAutoOpen(storage), false)
+  saveAutoOpen(storage, true)
+  assert.equal(storage.getItem(AUTO_OPEN_KEY), '1')
+  assert.equal(loadAutoOpen(storage), true)
+  saveAutoOpen(storage, false)
+  assert.equal(loadAutoOpen(storage), false)
+  assert.equal(loadAutoOpen({ getItem() { throw new Error('blocked') } }), false)
+  assert.doesNotThrow(() => saveAutoOpen({ setItem() { throw new Error('blocked') } }, true))
 })
 
 // --- float-position API (0.1.12 free-positioning) ---

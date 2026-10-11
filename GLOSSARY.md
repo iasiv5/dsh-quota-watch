@@ -31,6 +31,15 @@ _Avoid_: Presenting an inverted value as provider-reported used; deriving used f
 **Provider usage statistic**: Token totals and call counts that a provider's monitor API reports for a stated query interval, such as the host-local calendar day ("today"). It is a consumption measure over an interval, distinct from quota windows and from anything inferred from DSH session events.
 _Avoid_: Calling it a quota; session usage; treating the interval as a rolling window unless it is one
 
+**Reset card**: An expiring, provider-granted entitlement that can be redeemed once to clear an eligible quota window; a weekly reset card also clears the five-hour window. It is not the quota window or its remaining percentage.
+_Avoid_: Quota balance, free refresh
+
+**Card redemption**: The irreversible consumption of one reset card, distinct from querying a card count or refreshing a quota observation.
+_Avoid_: Refresh, re-probe
+
+**Automatic card use**: A separately authorized policy that redeems a reset card when a fresh quota observation meets the chosen window's trigger. Merely expanding the automatic-use controls is not that authorization.
+_Avoid_: Automatic refresh, auto-visible controls
+
 ### UI surfaces
 
 **Capsule**:

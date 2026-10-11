@@ -3,12 +3,18 @@ export const API_PREFIX = '/api/dsh-quota-watch'
 export const ROUTES = Object.freeze({
   overview: `${API_PREFIX}/overview`,
   refresh: `${API_PREFIX}/refresh`,
+  resetCards: `${API_PREFIX}/reset-cards`,
+  resetUse: `${API_PREFIX}/reset-cards/use`,
+  autoReset: `${API_PREFIX}/auto-reset`,
 })
 
 // The Web UI is served under <base href="./">; clients must use document-relative paths.
 export const CLIENT_ROUTES = Object.freeze({
   overview: `${API_PREFIX.slice(1)}/overview`,
   refresh: `${API_PREFIX.slice(1)}/refresh`,
+  resetCards: `${API_PREFIX.slice(1)}/reset-cards`,
+  resetUse: `${API_PREFIX.slice(1)}/reset-cards/use`,
+  autoReset: `${API_PREFIX.slice(1)}/auto-reset`,
 })
 
 export const PROVIDER_IDS = Object.freeze({
