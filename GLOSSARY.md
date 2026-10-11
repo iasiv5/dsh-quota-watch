@@ -34,16 +34,31 @@ _Avoid_: Calling it a quota; session usage; treating the interval as a rolling w
 **Reset card**: An expiring, provider-granted entitlement that can be redeemed once to clear an eligible quota window; a weekly reset card also clears the five-hour window. It is not the quota window or its remaining percentage.
 _Avoid_: Quota balance, free refresh
 
+**Reset-card availability**: A provider observation of currently usable reset cards. A successful empty result means none are available; a failed query means availability is unknown, not zero.
+_Avoid_: Treating a failed query as no cards, quota balance
+
 **Card redemption**: The irreversible consumption of one reset card, distinct from querying a card count or refreshing a quota observation.
 _Avoid_: Refresh, re-probe
+
+**Uncertain redemption**: A card-use request whose outcome cannot be confirmed; the card may already have been consumed. Affected quota windows remain protected from another redemption until the outcome is reconciled by the user.
+_Avoid_: Confirmed failure, safe-to-retry timeout
 
 **Automatic card use**: A separately authorized policy that redeems a reset card when a fresh quota observation meets the chosen window's trigger. Merely expanding the automatic-use controls is not that authorization.
 _Avoid_: Automatic refresh, auto-visible controls
 
+**Awaiting reset card**: A non-error automatic-use outcome when an authorized quota window has reached its trigger but no eligible reset card is available. No card is consumed; the authorization remains in place.
+_Avoid_: Automatic redemption failure, completed redemption
+
+**Automatic-use window state**: The current readiness or outcome of automatic card use for one quota window, independent of the other window and distinct from a historical event.
+_Avoid_: One global last event as the state of both windows
+
+**Automatic-use settings**: A disclosure of the independent per-window authorizations for automatic card use. Opening or closing it neither authorizes nor redeems a card.
+_Avoid_: Master auto-use switch, auto-use enabled (when referring to the disclosure)
+
 ### UI surfaces
 
 **Capsule**:
-The persistent, draggable floating pill — the plugin's only guaranteed surface — that renders each provider's used percentage in one line. It mounts at the top level of the page (never inside host-managed containers), opens the panel on click, and is the plugin's primary entry point; it has no context menu (its actions live in the panel footer).
+The persistent, draggable floating pill — the plugin's only guaranteed surface — that renders each provider's used percentage in one line and opens the panel. It is the plugin's primary entry point, distinct from the optional sidebar card.
 _Avoid_: floating ball, ball, floating window, FAB, widget, mini mode, context menu
 
 **Free-floating position memory**:
@@ -51,7 +66,7 @@ The capsule's position persistence behavior where user-placed coordinates {x, y}
 _Avoid_: edge docking (retired), magnetic snap, peek, unconstrained coordinates
 
 **Panel**:
-The floating detail surface opened from the capsule or a card row; it renders the quota overview and per-provider detail views, with a footer grid of two equal-width buttons — the sidebar-card toggle and a manual refresh — that replaced the retired capsule context menu.
+The floating surface opened from the capsule or a card row; it presents the quota overview and per-provider details. It is distinct from the persistent capsule and the optional sidebar card.
 _Avoid_: popup, pop (implementation class name only), modal, context menu
 
 **Sidebar card (card)**:
