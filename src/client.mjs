@@ -66,9 +66,9 @@ const COPY = {
       count: '{count} 张',
       none: '无可用',
       use: '重置',
-      reloadLink: '（刷新）',
+      reloadLink: '（ 刷新 ）',
       autoToggle: '自动用卡',
-      autoActive: '自动用卡·已启用',
+      autoActive: '自动用卡 · 已启用',
       expiry: '{date} 前有效',
       confirmTitle: '确认使用重置卡？',
       confirmWeek: '将消耗 1 张每周重置卡，立即重置每周额度与 5 小时额度。',
@@ -80,8 +80,11 @@ const COPY = {
       succeeded: '已重置',
       failed: '重置失败',
       loadFailed: '读取重置卡失败',
-      autoFiveHour: '自动用卡（5 小时）· 已用 {threshold}% 触发',
-      autoWeek: '自动用卡（每周）· 已用 {threshold}% 触发',
+      // Auto rows render as three grid cells — window label, a centered ·
+      // separator, and the used note — so the · column lines up across rows.
+      autoFiveHour: '自动用卡（5 小时）',
+      autoWeek: '自动用卡（每周）',
+      autoUsed: '已用 {threshold}% 触发',
       autoImmediate: '当前已用 {used}，已超阈值：开启后会立即消耗一张卡',
       autoSaveFailed: '开关未能保存，请重试',
       autoPersistFailed: '开关已生效，但未能写入磁盘（重启后会丢失）',
@@ -135,7 +138,7 @@ const COPY = {
       count: '{count}',
       none: 'none',
       use: 'Reset',
-      reloadLink: '(Refresh)',
+      reloadLink: '( Refresh )',
       autoToggle: 'Auto-use',
       autoActive: 'Auto-use · on',
       expiry: 'expires {date}',
@@ -149,8 +152,10 @@ const COPY = {
       succeeded: 'Reset done',
       failed: 'Reset failed',
       loadFailed: 'Could not read reset cards',
-      autoFiveHour: 'Auto-use (5h) · trigger at {threshold}% used',
-      autoWeek: 'Auto-use (weekly) · trigger at {threshold}% used',
+      // Same three-cell grid as zh: label · used note.
+      autoFiveHour: 'Auto-use (5h)',
+      autoWeek: 'Auto-use (weekly)',
+      autoUsed: 'trigger at {threshold}% used',
       autoImmediate: 'Currently {used} used — already past the threshold: turning this on spends a card immediately',
       autoSaveFailed: 'Could not save the switch — retry',
       autoPersistFailed: 'Switch applied, but it could not be written to disk (lost on restart)',
@@ -273,9 +278,11 @@ const FLOAT_STYLE_TEXT = `
 .dqw-reset { border-top: 1px dashed var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .dqw-reset-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 10px; line-height: 14px; }
 .dqw-reset-title { opacity: .65; }
-.dqw-reset-reload { border: 0; background: none; padding: 0; font: inherit; font-size: 10px; color: var(--dsw-alias-label-secondary, inherit); opacity: .65; cursor: pointer; text-decoration: underline; }
+/* No underline: the full-width 「（ 刷新 ）」 brackets carry the affordance, the
+   hover opacity bump is the only hover signal. */
+.dqw-reset-reload { border: 0; background: none; padding: 0; font: inherit; font-size: 10px; color: var(--dsw-alias-label-secondary, inherit); opacity: .65; cursor: pointer; }
 .dqw-reset-reload:hover { opacity: 1; }
-.dqw-reset-reload:disabled { cursor: default; opacity: .35; text-decoration: none; }
+.dqw-reset-reload:disabled { cursor: default; opacity: .35; }
 .dqw-reset-head-left { display: flex; align-items: baseline; min-width: 0; }
 .dqw-reset-head-left.is-en { gap: 4px; }
 .dqw-auto-master { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 10px; line-height: 14px; }
@@ -306,13 +313,21 @@ const FLOAT_STYLE_TEXT = `
 .dqw-reset-notice.is-error { color: var(--dsw-alias-label-danger, #c93c3c); }
 .dqw-reset-auto { font-size: 10px; line-height: 14px; opacity: .6; }
 /* Auto-use switches: a real checkbox per window, backed by a host-side file so
-   automatic spending keeps working while no browser is open. */
-.dqw-auto { display: flex; flex-direction: column; gap: 1px; }
-.dqw-auto-row { display: flex; align-items: center; gap: 6px; font-size: 10.5px; line-height: 16px; cursor: pointer; }
+   automatic spending keeps working while no browser is open. Both rows share one
+   grid (same recipe as .dqw-reset-lines): the window label stays left-aligned,
+   the · sits in its own narrow centered column so the two rows line up, and the
+   used note follows after the column gap. display:contents keeps the <label>
+   wrapping its checkbox for click-to-toggle while the cells join the grid. */
+.dqw-auto-grid { display: grid; grid-template-columns: max-content max-content 12px minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: center; font-size: 10.5px; line-height: 16px; }
+.dqw-auto { display: contents; }
+.dqw-auto-row { display: contents; }
+.dqw-auto-grid label > :is(input, span) { cursor: pointer; }
 .dqw-auto-box { width: 12px; height: 12px; margin: 0; flex: none; cursor: pointer; accent-color: var(--dsw-alias-button-primary-fill, #5b8def); }
 .dqw-auto-box:disabled { cursor: default; }
-.dqw-auto-label { opacity: .75; }
-.dqw-auto-hint { font-size: 10px; line-height: 14px; padding-left: 18px; color: var(--dsw-alias-label-warning, #d29922); }
+.dqw-auto-label { opacity: .75; white-space: nowrap; }
+.dqw-auto-dot { justify-self: center; opacity: .75; }
+.dqw-auto-used { opacity: .75; min-width: 0; }
+.dqw-auto-hint { grid-column: 1 / -1; font-size: 10px; line-height: 14px; padding-left: 18px; color: var(--dsw-alias-label-warning, #d29922); }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
 `
 
@@ -1100,9 +1115,13 @@ export function mountQuotaCard({
     box.disabled = autoSaving === true
     box.addEventListener('change', () => { void saveAutoReset(configKey, box.checked) })
     const threshold = typeof entry?.threshold === 'number' ? entry.threshold : AUTO_RESET_THRESHOLD_FALLBACK
-    row.append(box, text(doc, 'span', 'dqw-auto-label',
-      (windowKey === '5h' ? copy.resetCards.autoFiveHour : copy.resetCards.autoWeek)
-        .replace('{threshold}', formatNumber(threshold, locale))))
+    // Structured cells — window label (left), · (centered column, aligned across
+    // rows), used note — joined by the shared .dqw-auto-grid column gap.
+    const cards = copy.resetCards
+    row.append(box,
+      text(doc, 'span', 'dqw-auto-label', windowKey === '5h' ? cards.autoFiveHour : cards.autoWeek),
+      text(doc, 'span', 'dqw-auto-dot', '·'),
+      text(doc, 'span', 'dqw-auto-used', cards.autoUsed.replace('{threshold}', formatNumber(threshold, locale))))
     wrap.append(row)
 
     // Usage is already past the threshold: turning this on spends a card at the
@@ -1122,7 +1141,7 @@ export function mountQuotaCard({
     section.className = 'dqw-reset'
     const head = doc.createElement('div')
     head.className = 'dqw-reset-head'
-    // Left: the title carries the manual reload affordance —「额度重置卡（刷新）」.
+    // Left: the title carries the manual reload affordance —「额度重置卡（ 刷新 ）」.
     const headLeft = doc.createElement('div')
     headLeft.className = `dqw-reset-head-left${locale === 'en' ? ' is-en' : ''}`
     headLeft.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
@@ -1185,9 +1204,13 @@ export function mountQuotaCard({
     if (auto !== undefined && typeof auto === 'object') {
       // The two auto-use rows stay collapsed behind the header toggle; the event
       // notices below still render while collapsed so auto activity stays visible.
+      // One shared grid is what keeps the · column aligned across both rows.
       if (autoOpen === true) {
-        section.append(renderAutoResetRow('5h', 'fiveHour', auto.fiveHour, auto))
-        section.append(renderAutoResetRow('week', 'week', auto.week, auto))
+        const grid = doc.createElement('div')
+        grid.className = 'dqw-auto-grid'
+        grid.append(renderAutoResetRow('5h', 'fiveHour', auto.fiveHour, auto),
+          renderAutoResetRow('week', 'week', auto.week, auto))
+        section.append(grid)
       }
       const last = auto.lastEvent
       if (last?.kind === 'auto') {
