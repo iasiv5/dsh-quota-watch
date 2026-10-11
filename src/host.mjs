@@ -516,13 +516,24 @@ export function createQuotaService(ctx, options = {}) {
   //               same window is retried, so a persistent error cannot hammer
   //               the upstream every poll.
 
-  function refresh() {
-    if (pollPromise !== undefined) return pollPromise
+  function refresh(forceCards = false) {
+    if (pollPromise !== undefined) {
+      // A manual refresh must still re-list cards when it overlaps a scheduled
+      // round whose ten-minute gate skipped the list.
+      if (forceCards !== true) return pollPromise
+      return pollPromise.then(async () => {
+        if (!disposed) await probeResetCards(true)
+        return view()
+      })
+    }
     if (disposed) return Promise.resolve(view())
     pollPromise = Promise.all([probeGlm(), probeCopilot()])
       .then(async () => {
         updatedAt = now()
+        // Spending gets priority over the read-only background list: otherwise
+        // two wallet reads could race and a manual spend could slip between them.
         await maybeAutoReset()
+        await probeResetCards(forceCards === true)
         return view()
       })
       .finally(() => { pollPromise = undefined })
@@ -530,11 +541,31 @@ export function createQuotaService(ctx, options = {}) {
   }
 
   // --- Reset cards -----------------------------------------------------------
-  // Card state is kept apart from the quota snapshot: a card list is only fetched
-  // on demand (opening the panel, or right before spending one), and a failed fetch
-  // must never blank the provider rows the poller maintains.
+  // Card state is independent of the quota probes: poll it on its own slow
+  // clock, as well as on demand and before spending. A failed list never blanks
+  // the provider rows or turns a known card count into an authoritative zero.
   let resetState
   let resetSpendInFlight = false
+  let resetProbePromise
+  const RESET_CARDS_POLL_INTERVAL_MS = 10 * 60_000
+
+  async function probeResetCards(force = false) {
+    if (configuredGlmProvider(ctx) !== PROVIDER_IDS.glmDomestic || resetSpendInFlight) return
+    if (resetProbePromise !== undefined) return resetProbePromise
+    if (!force && resetState?.checkedAt !== undefined
+      && now() - resetState.checkedAt < RESET_CARDS_POLL_INTERVAL_MS) return
+    const probe = (async () => {
+      try {
+        await listResetCards()
+      } catch (error) {
+        // Even unexpected credential failures cannot break the quota poll round.
+        const { message, kind } = classifyProbeError(error)
+        resetState = { status: 'error', error: message, errorKind: kind, checkedAt: now() }
+      }
+    })()
+    resetProbePromise = probe
+    try { await probe } finally { resetProbePromise = undefined }
+  }
 
   /** Resolve the GLM provider + key, or report why no reset can be attempted. */
   async function resetCredential() {
@@ -548,11 +579,8 @@ export function createQuotaService(ctx, options = {}) {
     return { provider, apiKey }
   }
 
-  /**
-   * Fetch the available reset cards.
-   * `force` is advisory only — the endpoint is cheap and the panel opens rarely, so
-   * every call re-reads upstream rather than serving a stale count before a spend.
-   */
+  /** Fetch the live available cards. The poll clock gates only the background
+   * probe; an explicit list or spend always re-reads upstream. */
   async function listResetCards() {
     const credential = await resetCredential()
     if (credential.error !== undefined) {
@@ -584,6 +612,9 @@ export function createQuotaService(ctx, options = {}) {
     if (resetSpendInFlight) return { ok: false, error: 'busy', message: '重置操作进行中，请稍后重试' }
     resetSpendInFlight = true
     try {
+      // A spend re-lists against live state; wait for any cosmetic background
+      // read first so its older result cannot overwrite the post-spend wallet.
+      if (resetProbePromise !== undefined) await resetProbePromise
       return await performResetCard(args, autoWindowKey)
     } finally {
       resetSpendInFlight = false
@@ -842,7 +873,7 @@ export function makeRefreshRoute(ctx, service) {
     handler: async (req, res) => {
       if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
       try {
-        await service.refresh()
+        await service.refresh(true)
         responseJson(res, 200, service.overview())
       } catch {
         responseJson(res, 500, { ok: false, error: 'refresh failed' })

@@ -1440,9 +1440,14 @@ test('no-data backoff re-polls fast, then returns to the long cadence once data 
   }
   const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 400, retryNoDataMs: 4 })
   try {
-    await new Promise((resolve) => setTimeout(resolve, 30))
+    // A fixed 30ms wall-clock sleep flakes under concurrent jsdom suites; wait
+    // for the third poll within a bound still shorter than the 400ms warm cadence.
+    const deadline = Date.now() + 250
+    while (calls < 3 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
     const fastCount = calls
-    assert.ok(fastCount >= 3, `initial poll plus backoff retries land within 30ms (got ${fastCount})`)
+    assert.ok(fastCount >= 3, `initial poll plus backoff retries beat the 400ms warm cadence (got ${fastCount})`)
     await new Promise((resolve) => setTimeout(resolve, 40))
     const afterData = calls
     assert.ok(afterData >= fastCount, 'the poll that carries data has run')
@@ -1547,9 +1552,10 @@ test('domestic reset section stays three lines, shows Beijing expiry, and persis
   panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   await turn()
-  assert.match(panel.textContent, /额度重置卡（ 刷新 ）/)
+  assert.equal(panel.querySelector('.dqw-reset-head .dqw-reset-title').textContent, '额度重置卡')
+  assert.equal(panel.querySelector('.dqw-reset-reload'), null, '立即刷新 replaces the local button')
   const floatStyle = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('style').textContent
-  assert.doesNotMatch(floatStyle, /\.dqw-reset-reload \{[^}]*text-decoration/, '（ 刷新 ）brackets carry the affordance; no underline')
+  assert.match(floatStyle, /\.dqw-reset \{ border-top: 1px dashed/, 'expanded reset block retains its divider')
   assert.match(floatStyle, /\.dqw-auto-grid \{ display: grid; grid-template-columns: max-content max-content 12px minmax\(0, 1fr\)/, 'auto rows share one three-cell alignment grid')
   const cardRows = [...panel.querySelectorAll('.dqw-reset-row')]
   assert.equal(cardRows.length, 2)
@@ -1602,7 +1608,55 @@ test('international GLM detail omits domestic reset section and never lists card
   window.close()
 })
 
-test('English reset heading and refresh control use the updated quota terminology', async () => {
+test('empty wallet collapses behind its divider while auto controls remain reachable and force-refresh reveals cards', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  let wallet = { status: 'ready', cards: { fiveHour: [], week: [] } }
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    requests.push({ path: String(path), method: init.method ?? 'GET' })
+    if (String(path).endsWith('/reset-cards')) return response({ ok: true, cards: wallet.cards })
+    return response({ ...snapshot([glmProvider({ providerId: 'zai-coding-cn' })]), reset: wallet,
+      autoReset: { fiveHour: { enabled: false, threshold: 99.9 }, week: { enabled: false, threshold: 99.9 } } })
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+    floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    assert.equal(panel.querySelector('.dqw-reset-collapsed .dqw-reset-title').textContent, '额度重置卡 · 无可用')
+    assert.equal(panel.querySelector('.dqw-reset-lines'), null)
+    assert.ok(panel.querySelector('.dqw-reset'), 'collapsed block keeps the dashed divider')
+    assert.equal(requests.some(({ path }) => path.endsWith('/reset-cards')), false, 'empty host summary avoids a duplicate lazy list')
+    panel.querySelector('.dqw-auto-master input').click()
+    await turn()
+    assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 2, 'pre-arming stays reachable despite zero cards')
+    assert.equal(requests.some(({ path }) => path.endsWith('/reset-cards')), false, 'expanding cached wallet does not re-list upstream')
+    panel.querySelector('.dqw-auto-master input').click()
+    await turn()
+    assert.ok(panel.querySelector('.dqw-reset-collapsed'), 'closing disclosure restores the single line')
+
+    wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 8, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+    panel.querySelector('[data-action="panel-refresh"]').click()
+    await turn()
+    await turn()
+    assert.equal(requests.filter(({ method }) => method === 'POST').length, 1, 'one 立即刷新 request updates quotas and cards')
+    assert.equal(panel.querySelector('.dqw-reset-collapsed'), null)
+    assert.equal(panel.querySelectorAll('.dqw-reset-row').length, 2)
+    assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1)
+
+    wallet = { status: 'error', error: 'HTTP 503' }
+    panel.querySelector('[data-action="panel-refresh"]').click()
+    await turn()
+    await turn()
+    assert.equal(panel.querySelector('.dqw-reset-collapsed'), null, 'a failed list retains the last good wallet')
+    assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1)
+  } finally { dispose(); window.close() }
+})
+
+test('English empty reset section collapses to one row and keeps its separator', async () => {
   const window = dom({ locale: 'en-US' })
   const data = snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()])
   const fetchImpl = async (path) => response(String(path).endsWith('/reset-cards')
@@ -1615,9 +1669,10 @@ test('English reset heading and refresh control use the updated quota terminolog
   panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   await turn()
-  assert.equal(panel.querySelector('.dqw-reset-title').textContent, 'Quota reset cards')
-  assert.equal(panel.querySelector('.dqw-reset-reload').textContent, '( Refresh )')
-  assert.ok(panel.querySelector('.dqw-reset-head-left.is-en'))
+  assert.equal(panel.querySelector('.dqw-reset-collapsed .dqw-reset-title').textContent, 'Quota reset cards · none')
+  assert.equal(panel.querySelector('.dqw-reset-reload'), null)
+  assert.equal(panel.querySelector('.dqw-reset-lines'), null)
+  assert.ok(panel.querySelector('.dqw-reset'), 'the same wrapper keeps the dashed divider')
   dispose()
   window.close()
 })

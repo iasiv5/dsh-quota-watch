@@ -214,14 +214,57 @@ test('a failed spend is recorded and backed off, never thrown', async () => {
   service.stop()
 })
 
-test('auto-reset disabled by default never touches the reset endpoints', async () => {
+test('auto-reset disabled by default lists cards but never spends them', async () => {
   const fetchImpl = stubFetch()
   const service = createQuotaService(stubCtx(), { fetchImpl, autoResetSettingsPath: tempSettingsPath().path })
   await service.refresh()
   const resetCalls = fetchImpl.calls.filter((c) => c.url.includes('customer-package-reset'))
-  assert.equal(resetCalls.length, 0, 'default-off must mean zero reset traffic')
+  assert.deepEqual(resetCalls.map((call) => call.url.includes('/list') ? 'list' : 'use'), ['list'],
+    'wallet visibility needs a read on the first poll, but default-off forbids any write')
   assert.equal(service.overview().autoReset.week.enabled, false)
   service.stop()
+})
+
+test('wallet probe rides the host poll on a ten-minute gate; force bypasses and failures back off', async () => {
+  let clock = 1_000_000
+  let failList = false
+  const healthy = stubFetch({ plan: WEEK_AT_10 })
+  const fetchImpl = (url, init) => {
+    if (failList && String(url).includes('/customer-package-reset/list')) {
+      return Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
+    }
+    return healthy(url, init)
+  }
+  const service = createQuotaService(stubCtx(), {
+    fetchImpl, now: () => clock, autoResetSettingsPath: tempSettingsPath().path,
+  })
+  const listCount = () => healthy.calls.filter((call) => call.url.includes('/customer-package-reset/list')).length
+  try {
+    await service.refresh()
+    assert.equal(listCount(), 1, 'first poll learns the wallet even with auto-spend disabled')
+    assert.equal(service.overview().reset.status, 'ready')
+    assert.equal(service.overview().reset.cards.week.length, 1)
+    clock += 9 * 60_000
+    await service.refresh()
+    assert.equal(listCount(), 1, 'the 60-second quota poll does not imply a card-list request')
+    await service.refresh(true)
+    assert.equal(listCount(), 2, '立即刷新 bypasses the wallet gate')
+    clock += 9 * 60_000
+    await service.refresh()
+    assert.equal(listCount(), 2, 'the forced check resets the ten-minute clock')
+    clock += 60_000
+    failList = true
+    await service.refresh()
+    assert.equal(service.overview().reset.status, 'error', 'wallet failure stays separate from ready GLM quota')
+    assert.equal(service.overview().providers.find((provider) => provider.key === 'glm').status, 'ready')
+    clock += 60_000
+    await service.refresh()
+    assert.equal(listCount(), 2, 'failed listing still starts a quiet period')
+    failList = false
+    clock += 9 * 60_000
+    await service.refresh()
+    assert.equal(listCount(), 3, 'the wallet recovers at the next due round')
+  } finally { service.stop() }
 })
 
 test('autoResetConfigFor maps window keys and degrades to disabled', () => {
@@ -408,6 +451,39 @@ test('simultaneous high week and 5h usage spends a weekly card only', async () =
     assert.equal(uses.length, 1)
     assert.equal(JSON.parse(uses[0].body).resetType, 'WEEK')
     assert.equal(service.overview().autoReset.fiveHour.armed, false)
+    service.stop()
+  } finally { rmSync(dir, { recursive: true, force: true }) }
+})
+
+test('manual spend waits for an in-flight background wallet read before using a live card', async () => {
+  const { dir, path } = tempSettingsPath()
+  try {
+    const healthy = stubFetch({ plan: WEEK_AT_10 })
+    let releaseList, listStarted
+    const gate = new Promise((resolve) => { releaseList = resolve })
+    const entered = new Promise((resolve) => { listStarted = resolve })
+    let firstList = true
+    const fetchImpl = async (url, init) => {
+      if (firstList && String(url).includes('/customer-package-reset/list')) {
+        firstList = false
+        listStarted()
+        await gate
+      }
+      return healthy(url, init)
+    }
+    const service = createQuotaService(stubCtx(), { fetchImpl, autoResetSettingsPath: path })
+    const poll = service.refresh()
+    await entered
+    const manual = service.useResetCard({ resetType: 'WEEK' })
+    await Promise.resolve()
+    assert.equal(healthy.calls.filter((call) => call.url.includes('/customer-package-reset/use')).length, 0,
+      'a spend never overtakes the background read')
+    releaseList()
+    assert.equal((await manual).ok, true)
+    await poll
+    assert.equal(healthy.calls.filter((call) => call.url.includes('/customer-package-reset/use')).length, 1)
+    assert.ok(healthy.calls.filter((call) => call.url.includes('/customer-package-reset/list')).length >= 3,
+      'spending still re-lists immediately before use and once afterwards')
     service.stop()
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })

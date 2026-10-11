@@ -66,7 +66,6 @@ const COPY = {
       count: '{count} 张',
       none: '无可用',
       use: '重置',
-      reloadLink: '（ 刷新 ）',
       autoToggle: '自动用卡',
       autoActive: '自动用卡 · 已启用',
       expiry: '{date} 前有效',
@@ -138,7 +137,6 @@ const COPY = {
       count: '{count}',
       none: 'none',
       use: 'Reset',
-      reloadLink: '( Refresh )',
       autoToggle: 'Auto-use',
       autoActive: 'Auto-use · on',
       expiry: 'expires {date}',
@@ -234,6 +232,8 @@ const FLOAT_STYLE_TEXT = `
 .dqw-panel-back { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; }
 .dqw-panel-back svg { display: block; width: 16px; height: 16px; }
 .dqw-panel-back:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
+.dqw-panel-refresh { flex: none; margin: 0; padding: 4px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 10px; line-height: 14px; opacity: .72; }
+.dqw-panel-refresh:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); opacity: 1; }
 .dqw-panel-close { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; margin: 0; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--dsw-alias-label-secondary, inherit); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
 .dqw-panel-close:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128,128,128,.12)); color: var(--dsw-alias-label-primary, inherit); }
 .dqw-overview-list { display: flex; flex-direction: column; gap: 2px; }
@@ -273,18 +273,11 @@ const FLOAT_STYLE_TEXT = `
 .dqw-win-mid { opacity: .65; white-space: nowrap; }
 .dqw-win-used { opacity: .65; white-space: nowrap; }
 .dqw-win-val { min-width: 0; font-weight: 600; }
-/* Reset cards: a bordered block below the window grid. Every control is a real
-   <button> so keyboard focus and the disabled state come from the platform. */
+/* Reset cards: keep the dashed divider even when an empty wallet collapses to
+   one row. The panel's 立即刷新 is the only manual re-check control. */
 .dqw-reset { border-top: 1px dashed var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
-.dqw-reset-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 10px; line-height: 14px; }
+.dqw-reset-head, .dqw-reset-collapsed { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 10px; line-height: 14px; }
 .dqw-reset-title { opacity: .65; }
-/* No underline: the full-width 「（ 刷新 ）」 brackets carry the affordance, the
-   hover opacity bump is the only hover signal. */
-.dqw-reset-reload { border: 0; background: none; padding: 0; font: inherit; font-size: 10px; color: var(--dsw-alias-label-secondary, inherit); opacity: .65; cursor: pointer; }
-.dqw-reset-reload:hover { opacity: 1; }
-.dqw-reset-reload:disabled { cursor: default; opacity: .35; }
-.dqw-reset-head-left { display: flex; align-items: baseline; min-width: 0; }
-.dqw-reset-head-left.is-en { gap: 4px; }
 .dqw-auto-master { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 10px; line-height: 14px; }
 .dqw-auto-master .dqw-auto-box { accent-color: var(--dsw-alias-button-primary-fill, #5b8def); }
 .dqw-reset-lines { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr) max-content max-content; column-gap: 6px; row-gap: 4px; align-items: center; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
@@ -817,9 +810,11 @@ export function mountQuotaCard({
   let queuedPlace = false
   let openKey
   let panelNav = false
-  // Reset-card state is client-local: the card list is fetched only while the GLM
-  // detail is open, so a closed panel never costs an extra upstream round trip.
-  let resetInfo           // last listResetCards payload (or a synthesized error)
+  // The host now refreshes the wallet on a slow independent clock; the detail
+  // still fetches on first open. Keep the last authoritative list through a
+  // transient list failure so the section never vanishes or invents zero cards.
+  let knownResetCards
+  let resetInfo           // last on-demand listResetCards payload (or an error)
   let resetLoading = false
   let resetPending        // reset type awaiting confirmation, or undefined
   let resetBusy           // reset type currently being spent, or undefined
@@ -890,8 +885,8 @@ export function mountQuotaCard({
     return [row]
   }
 
-  /** Panel chrome: optional back, title, always a close affordance. */
-  const panelHeader = ({ title, showBack = false }) => {
+  /** Panel chrome: optional back/refresh, title and close affordance. */
+  const panelHeader = ({ title, showBack = false, showRefresh = false }) => {
     const header = doc.createElement('div')
     header.className = 'dqw-panel-header'
     if (showBack) {
@@ -905,6 +900,15 @@ export function mountQuotaCard({
       header.append(back)
     }
     header.append(text(doc, 'p', 'dqw-panel-title', title))
+    if (showRefresh) {
+      const refresh = doc.createElement('button')
+      refresh.type = 'button'
+      refresh.className = 'dqw-panel-refresh'
+      refresh.dataset.action = 'panel-refresh'
+      refresh.textContent = copy.actions.refreshNow
+      refresh.setAttribute('aria-label', copy.actions.refreshNow)
+      header.append(refresh)
+    }
     const close = doc.createElement('button')
     close.type = 'button'
     close.className = 'dqw-panel-close'
@@ -971,11 +975,8 @@ export function mountQuotaCard({
     panel.append(overviewActions())
   }
 
-  /**
-   * Fetch the reset-card list and repaint the open panel.
-   * Called when the GLM detail opens and after a spend; never on the poller, so a
-   * closed panel costs nothing upstream.
-   */
+  /** Fetch a live card list for the detail or after spending, independently of
+   * the host's ten-minute background snapshot and its force-refresh route. */
   async function loadResetCards() {
     if (resetLoading || disposed) return
     resetLoading = true
@@ -983,6 +984,7 @@ export function mountQuotaCard({
     try {
       const payload = await fetchResetEnvelope(fetchImpl, CLIENT_ROUTES.resetCards)
       resetInfo = payload
+      if (payload.ok === true && payload.cards !== undefined) knownResetCards = payload.cards
     } catch {
       resetInfo = { ok: false, error: 'request-failed' }
     } finally {
@@ -1010,6 +1012,7 @@ export function mountQuotaCard({
         // The host returns the post-reset card list; fall back to a re-list when it
         // could not refresh, so the panel never offers a card that is already gone.
         resetInfo = payload.cards !== undefined ? { ok: true, cards: payload.cards } : resetInfo
+        if (payload.cards !== undefined) knownResetCards = payload.cards
       } else {
         resetNotice = { kind: 'error', message: payload.message ?? copy.resetCards.failed }
       }
@@ -1135,57 +1138,74 @@ export function mountQuotaCard({
     return wrap
   }
 
+  /** Only an authoritative successful list can mean "no cards". Errors retain
+   * the last good inventory, preventing a transient upstream failure from hiding
+   * controls or claiming that a still-available card is gone. */
+  function resetCardsKnownEmpty() {
+    if (knownResetCards === undefined) return false
+    return Array.isArray(knownResetCards.fiveHour) && Array.isArray(knownResetCards.week)
+      && knownResetCards.fiveHour.length === 0 && knownResetCards.week.length === 0
+  }
+
+  function resetCollapsed() {
+    if (!resetCardsKnownEmpty() || autoOpen || resetPending !== undefined
+      || resetBusy !== undefined || resetNotice !== undefined || autoSaveError !== undefined) return false
+    const auto = snapshot?.autoReset
+    if (auto?.fiveHour?.enabled === true || auto?.week?.enabled === true
+      || auto?.persistError !== undefined || auto?.lastEvent !== undefined) return false
+    return true
+  }
+
+  /** This checkbox only reveals the real per-window switches; keep it reachable
+   * on the single-line empty state so an account without cards can still pre-arm. */
+  function buildAutoMaster(auto) {
+    if (auto === undefined || typeof auto !== 'object') return undefined
+    const master = doc.createElement('label')
+    master.className = 'dqw-auto-master'
+    const masterBox = doc.createElement('input')
+    masterBox.type = 'checkbox'
+    masterBox.className = 'dqw-auto-box'
+    masterBox.checked = autoOpen === true
+    masterBox.disabled = autoSaving === true
+    masterBox.addEventListener('change', () => {
+      autoOpen = masterBox.checked
+      saveAutoOpen(win.localStorage, autoOpen)
+      syncPop()
+    })
+    // An unchecked disclosure must never imply the host's auto-use switch is off.
+    const anyEnabled = auto.fiveHour?.enabled === true || auto.week?.enabled === true
+    master.append(text(doc, 'span', 'dqw-reset-title',
+      anyEnabled ? copy.resetCards.autoActive : copy.resetCards.autoToggle), masterBox)
+    return master
+  }
+
   /** The reset block: counts, per-type reset buttons, inline confirm and last result. */
   function renderResetSection() {
     const section = doc.createElement('div')
     section.className = 'dqw-reset'
+    const autoHeader = snapshot?.autoReset
+    const master = buildAutoMaster(autoHeader)
+    if (resetCollapsed()) {
+      const row = doc.createElement('div')
+      row.className = 'dqw-reset-collapsed'
+      row.append(text(doc, 'span', 'dqw-reset-title', `${copy.resetCards.section} · ${copy.resetCards.none}`))
+      if (master !== undefined) row.append(master)
+      section.append(row)
+      return section
+    }
     const head = doc.createElement('div')
     head.className = 'dqw-reset-head'
-    // Left: the title carries the manual reload affordance —「额度重置卡（ 刷新 ）」.
-    const headLeft = doc.createElement('div')
-    headLeft.className = `dqw-reset-head-left${locale === 'en' ? ' is-en' : ''}`
-    headLeft.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
-    const reload = doc.createElement('button')
-    reload.type = 'button'
-    reload.className = 'dqw-reset-reload'
-    reload.textContent = resetLoading ? copy.loading : copy.resetCards.reloadLink
-    reload.disabled = resetLoading || resetBusy !== undefined
-    reload.addEventListener('click', () => { loadResetCards() })
-    headLeft.append(reload)
-    head.append(headLeft)
-    // Right: a pure visibility toggle. Checking it only reveals the two auto-use
-    // rows below; actually enabling a window stays with its own per-window switch,
-    // so the default panel is three lines and no single click can arm auto-spend.
-    const autoHeader = snapshot?.autoReset
-    if (autoHeader !== undefined && typeof autoHeader === 'object') {
-      const master = doc.createElement('label')
-      master.className = 'dqw-auto-master'
-      const masterBox = doc.createElement('input')
-      masterBox.type = 'checkbox'
-      masterBox.className = 'dqw-auto-box'
-      masterBox.checked = autoOpen === true
-      masterBox.disabled = autoSaving === true
-      masterBox.addEventListener('change', () => {
-        autoOpen = masterBox.checked
-        saveAutoOpen(win.localStorage, autoOpen)
-        syncPop()
-      })
-      // Expansion is not authorization: disclose the persisted host switch state
-      // even when these rows are collapsed, so an unchecked box cannot imply off.
-      const anyEnabled = autoHeader.fiveHour?.enabled === true || autoHeader.week?.enabled === true
-      master.append(text(doc, 'span', 'dqw-reset-title',
-        anyEnabled ? copy.resetCards.autoActive : copy.resetCards.autoToggle), masterBox)
-      head.append(master)
-    }
+    head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
+    if (master !== undefined) head.append(master)
     section.append(head)
 
-    const cards = resetInfo?.ok === true && resetInfo.cards !== undefined ? resetInfo.cards : undefined
+    const cards = knownResetCards
     if (cards === undefined) {
       // Nothing fetched yet, a failed fetch, or no GLM credential on the host: say so
       // instead of drawing two rows of zeroes that look like "no cards left".
       const message = resetLoading
         ? copy.loading
-        : resetInfo?.message ?? (resetInfo === undefined ? copy.loading : copy.resetCards.loadFailed)
+        : resetInfo?.message ?? snapshot?.reset?.error ?? (resetInfo === undefined ? copy.loading : copy.resetCards.loadFailed)
       section.append(text(doc, 'p', 'dqw-muted', message))
       return section
     }
@@ -1260,7 +1280,7 @@ export function mountQuotaCard({
 
   function renderDetail(detail, key, provider, fromPanelNav = false) {
     detail.replaceChildren()
-    detail.append(panelHeader({ title: copy.providerNames[key], showBack: fromPanelNav }))
+    detail.append(panelHeader({ title: copy.providerNames[key], showBack: fromPanelNav, showRefresh: key === 'glm' }))
     if (provider?.status === 'stale') {
       const bannerPrefix = provider.errorKind === 'auth' ? copy.authRejected : copy.stale
       detail.append(text(doc, 'p', 'dqw-error', `${bannerPrefix}${provider.error ? `: ${provider.error}` : ''}`))
@@ -1343,10 +1363,9 @@ export function mountQuotaCard({
       // international (z.ai) provider would only ever render a permanent failure.
       if (provider?.credential === 'configured' && provider?.providerId === PROVIDER_IDS.glmDomestic) {
         detail.append(renderResetSection())
-        // Cards are fetched lazily: opening the GLM detail is the first moment the
-        // list is worth an upstream call, and the fetch repaints this panel when it
-        // lands.
-        if (resetInfo === undefined && !resetLoading) {
+        // The host snapshot carries the full recent wallet. Fetch lazily only
+        // when neither it nor a prior on-demand read has a usable card list.
+        if (resetInfo === undefined && knownResetCards === undefined && !resetLoading) {
           void loadResetCards()
         }
       }
@@ -1563,6 +1582,8 @@ export function mountQuotaCard({
 
   const render = (next) => {
     snapshot = next
+    const cards = next?.reset?.status === 'ready' ? next.reset.cards : undefined
+    if (Array.isArray(cards?.fiveHour) && Array.isArray(cards?.week)) knownResetCards = cards
     renderAll()
   }
 
@@ -1680,6 +1701,7 @@ export function mountQuotaCard({
     // sit inside this shadow tree, so a panel-level listener sees the real
     // target with no retargeting ambiguity.
     if (event.target?.closest?.('[data-action="panel-refresh"]')) {
+      // The host force-refresh re-lists cards too; do not issue a duplicate GET.
       void poll(true)
       return
     }

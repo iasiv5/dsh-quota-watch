@@ -55,7 +55,8 @@ test('one refresh probes both providers with current secrets and returns only no
   assert.equal(glm.usage.models.length, 2)
   assert.equal(copilot.status, 'ready')
   assert.equal(copilot.quota.remaining, 7600)
-  assert.equal(seen.length, 3)
+  assert.equal(seen.length, 4, 'plan, usage, Copilot and initial reset-card list')
+  assert.equal(seen.filter((request) => request.url.includes('/customer-package-reset/list')).length, 1)
   assert.ok(seen.find((request) => request.url.includes('model-usage')).url.includes('startTime='))
   assert.equal(seen.find((request) => request.url.includes('bigmodel.cn') && !request.url.includes('model-usage')).headers.authorization, 'synthetic-glm-key')
   assert.equal(seen.find((request) => request.url.includes('api.github.com')).headers.authorization, 'Bearer synthetic-github-oauth')
@@ -82,7 +83,8 @@ test('later refresh resolves rotated credentials instead of reusing old values',
   githubOAuth = 'synthetic-github-rotated'
   await service.refresh()
 
-  const bigmodelRequests = seen.filter((request) => request.url.includes('bigmodel.cn'))
+  const bigmodelRequests = seen.filter((request) => request.url.includes('bigmodel.cn')
+    && !request.url.includes('/customer-package-reset/'))
   assert.equal(bigmodelRequests.length, 4)
   assert.equal(bigmodelRequests.at(-1).authorization, 'synthetic-glm-rotated')
   assert.equal(bigmodelRequests.at(-2).authorization, 'synthetic-glm-rotated')
@@ -294,7 +296,8 @@ test('overview route requires paired access and returns no-store JSON', () => {
 
 test('cross-site routes are rejected and refresh is POST-only', async () => {
   const ctx = { remoteWebUiPairing: { isPairedDevice: () => true } }
-  const service = { overview: () => ({ providers: [] }), refresh: async () => ({ providers: [] }) }
+  const forceFlags = []
+  const service = { overview: () => ({ providers: [] }), refresh: async (force) => { forceFlags.push(force) } }
   const route = makeRefreshRoute(ctx, service)
   const crossSite = fakeResponse()
   await route.handler(pairedRequest({ method: 'POST', origin: 'https://attacker.example' }), crossSite)
@@ -308,6 +311,7 @@ test('cross-site routes are rejected and refresh is POST-only', async () => {
   await route.handler(pairedRequest({ method: 'POST' }), allowed)
   assert.equal(allowed.statusCode, 200)
   assert.deepEqual(JSON.parse(allowed.body), { providers: [] })
+  assert.deepEqual(forceFlags, [true], 'the one manual refresh control forces a fresh wallet list')
 })
 
 test('loopback access requires a loopback socket and ignores forwarded address headers', () => {
@@ -336,8 +340,9 @@ test('cold retries back off exponentially and cap at the normal cadence', async 
   }
   let attempts = 0
   const context = makeContext()
-  const fetchImpl = async () => {
-    attempts += 1
+  const fetchImpl = async (url) => {
+    // This test counts quota/Copilot probes, not the independent card poll.
+    if (!String(url).includes('/customer-package-reset/list')) attempts += 1
     throw new Error('still down')
   }
   const service = createQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
@@ -392,6 +397,7 @@ test('cold retry backoff resets after a successful round and restarts from the s
       copilotAttempts += 1
       return new Response('unauthorized', { status: 401 })
     }
+    if (url.includes('/customer-package-reset/list')) return new Response('unavailable', { status: 503 })
     glmAttempts += 1
     if (!glmWorks) throw new Error('glm down')
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -438,6 +444,7 @@ test('cold start probes immediately, retries fast while failing, and warms to th
   let attempts = 0
   const context = makeContext()
   const fetchImpl = async (url) => {
+    if (url.includes('/customer-package-reset/list')) return new Response('unavailable', { status: 503 })
     attempts += 1
     if (attempts <= 4) throw new Error('network not ready yet')
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
