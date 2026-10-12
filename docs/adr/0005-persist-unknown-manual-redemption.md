@@ -1,0 +1,11 @@
+# Persist manual reset-card outcomes until acknowledgement
+
+> Status: Accepted and implemented in the source tree (2026-10-12); not yet shipped or installed on any running profile. Extends the original unknown-outcome decision (2026-10-12) with the host→browser delivery-receipt protocol from review round R3-01.
+
+A manually confirmed reset-card POST may consume an irreversible entitlement under TWO distinct uncertainties, and the plugin treats both fail-closed:
+
+1. **The upstream outcome is unknown.** Before sending the POST, the host durably writes a minimal in-flight record (card type, attempt time, status and an opaque acknowledgement identifier, without credentials or provider card identifiers); if that write fails, no POST is sent. A timeout, a non-200 answer, an unparseable body or an unclear success flag keeps the record as `unknown`: the warning survives panel closure, browser refresh and host restart, further manual redemptions are blocked, and the user must check the provider's card count and quota, then explicitly acknowledge (which also requires a fresh successful domestic plan and card-list requery) before the lock lifts. An unknown result never triggers an automatic retry.
+
+2. **The upstream outcome is known but the browser never received it.** A definitive HTTP 200 answer (success or explicit refusal) is first persisted as a `known-success` / `known-refused` receipt — it is NOT cleared when the host answers the browser. If that response is lost (disconnect, crash, restart), the receipt survives and the snapshot shows the real outcome while keeping manual use locked; the browser acknowledges delivery with the same attempt id through a protected receipt route before the record is cleared. A lost response is therefore never reported as a confirmed failure, and the client never blindly retries.
+
+The journal holds exactly one entry: a new attempt is refused while any record is unresolved, a corrupted or unreadable record blocks consumption instead of reading as "no record", and a failed clear or acknowledge keeps the record and its lock. This chooses a small durable record over browser-only feedback and simpler writes, because silently losing an ambiguous spend warning or allowing a second spend is a worse failure.

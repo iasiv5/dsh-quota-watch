@@ -1,3 +1,5 @@
 # Permit opt-in reset-card redemption behind a host-side safety boundary
 
+> Status: Accepted (historical, 2026-09). The separately authorized per-window **automatic use described here was retired by ADR 0004**; listing and explicitly confirmed manual redemption remain in force.
+
 Quota Watch began as a read-only monitor, but a domestic GLM Coding Plan personal subscription can grant expiring reset cards that are useful during long runs. We accept listing and explicitly confirmed manual redemption, plus separately authorized, default-off per-window automatic use; the header control only reveals those authorizations. A card is a finite entitlement, so the host—not the browser—resolves credentials, rejects unverified international routes, requires fresh quota data, serializes redemptions, rechecks conditions after asynchronous reads, and stops automatic retries after an ambiguous write result. This trades a strictly read-only plugin for access to an existing subscription benefit while accepting an undocumented upstream API and its maintenance and terms-of-service risks; neither team-plan support nor uninterrupted quota is promised.

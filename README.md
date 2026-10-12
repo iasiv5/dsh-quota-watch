@@ -47,31 +47,23 @@ Web 与 Desktop profile 均已实测适配。按 DSH 插件管理器提示完成
 
 ## 配置
 
-在 GLM 详情面板的「自动用卡」配置界面，可分别设置两个独立开关：
+本插件不再包含任何自动用卡配置。宿主首次启动时会一次性把历史版本保存的自动用卡开关**持久覆写为关闭**（即使设置文件不存在也会写入全关覆盖），因此回退到旧版本也不会让旧授权复活；覆写失败仅报告回退风险，新宿主本身没有任何自动消费路径。可配置项仅剩 profile patch 中的 `pollIntervalSec`（默认 60 秒，只读额度轮询节奏）。
 
-- **5 小时自动用卡**：默认关闭。
-- **每周自动用卡**：默认关闭。
-
-开启某个开关即授权对应窗口自动使用重置卡；阈值与消费风险见下一节。
-
-## 重置卡与自动用卡
+## 重置卡与手动用卡
 
 > **重置卡是可消耗、不可撤销的订阅权益。** 使用前请确认适用范围、卡种与额度窗口。
 
-仅支持配置为 `zai-coding-cn` 的**国内站个人版**。国际站 `zai` / `zai-coding` 不提供此入口；团队版未验证、不在支持范围内。宿主启动时查询重置卡，此后最多每 10 分钟周期查询一次；卡种、可用张数与最早到期日会随结果更新。两种卡都无可用且自动用卡均关闭、无待展示事件时，卡区收成保留分隔线的一行，仍可展开自动用卡设置。概览底部或详情标题栏的「立即刷新」会同时更新额度和重置卡，不会消费卡；手动使用前宿主仍会重新查询当前卡列表，面板也会先显示二次确认。5 小时卡重置 5 小时窗口；每周卡同时重置每周与 5 小时窗口。
+仅支持配置为 `zai-coding-cn` 的**国内站个人版**。国际站 `zai` / `zai-coding` 不提供此入口；团队版未验证、不在支持范围内。宿主启动时查询重置卡，此后最多每 10 分钟周期查询一次（只读）；卡种、可用张数与最早到期日随最新快照更新。两种卡都无可用时，卡区收成保留分隔线的一行「无可用」；查询失败会如实显示「查询失败」并移除旧的可操作库存。概览底部或详情标题栏的「立即刷新」会同时更新额度和重置卡，不会消费卡。
 
-![GLM 详情：额度窗口、重置卡与展开的自动用卡设置；两个窗口的消费授权均关闭（示例数据）](docs/assets/panel-glm-detail.webp)
+手动用卡流程：选择卡种 → 面板内二次确认（写明卡种、影响窗口与不可撤销提醒）→ 宿主在发出不可撤销 POST **之前**，先把本次尝试持久写入宿主侧单笔记录，写入失败则直接拒绝发卡请求。消费请求串行执行，默认使用同卡种最早到期的卡；确认提交后只能等待结果，不能撤销。5 小时卡重置 5 小时窗口；每周卡同时重置每周与 5 小时窗口。
 
-图中的「自动用卡」勾选框只展开设置，不授权消费；下方 5 小时与每周两个开关才是各自独立的授权，截图中均为关闭状态。
+结果呈现遵循两条不确定性的安全默认：
 
-自动用卡须特别留意：
+- **上游结果未知**（超时、非 200、响应无法判定）：界面显示「结果未确认，请核对服务商官方卡数和额度」，并持久锁定下一次手动用卡，直到你在面板中明确点「我已核实」——核实需要宿主重新成功读取国内站计划与卡列表。该提示跨面板关闭、页面刷新与宿主重启。
+- **上游结果已知但浏览器未收到**（响应丢失、断连、宿主重启）：宿主保存的已知结果回执会跨重启显示真实结果（已确认成功，或上游明确拒绝），并锁定后续用卡；你点「我已了解结果」确认送达后，插件才清除该回执并解除锁定。
+- 插件不会自动重试任何一次消费；浏览器请求断连**不能**断言消费失败。
 
-- 两个窗口分别授权，默认均关闭；默认触发阈值是**已用 99.9%**（可设为 `50–99.9%`）。若启用时额度已达到阈值，下一次有效探测可能立即消费一张卡。
-- 开关与阈值保存在 DSH 宿主侧；关闭浏览器后，宿主仍可按轮询执行已授权的自动用卡。若保存设置损坏或无法读取，自动用卡会安全关闭。
-- 只使用本轮成功探测得到的新鲜 GLM 额度；过期快照不会触发消费。消费请求串行执行，每周卡优先；周卡成功后会同时解除 5 小时窗口的自动触发。
-- 默认宿主探测间隔为 60 秒；额度可能在两次探测之间耗尽，自动用卡**不保证不断流**。
-- 确定失败后至少等待 10 分钟才会重试。若 POST 超时、连接中断或结果无法判定，上游可能已经扣卡；插件会停止该窗口的自动重试。请先核实官方卡数与额度，不要盲目重试。
-- 国内站重置卡接口未公开且可能变化。使用前请核对智谱 Coding Plan 的适用工具与服务条款；不接受消耗型操作或未公开接口风险时，请勿使用重置卡功能。
+手动用卡仍须特别留意：国内站重置卡接口未公开且可能变化。使用前请核对智谱 Coding Plan 的适用工具与服务条款；不接受消耗型操作或未公开接口风险时，请勿使用重置卡功能。
 
 ## Copilot 与侧边栏界面
 
@@ -83,7 +75,7 @@ Web 与 Desktop profile 均已实测适配。按 DSH 插件管理器提示完成
 
 - **额度是快照，不是会话账本**：GLM 的额度窗口、今日 tokens / 调用次数，以及 Copilot 的额度视图都来自服务商报告；网络或上游处理可能造成延迟。
 - **Copilot 额度语义**：插件只采用 GitHub 报告的 `remaining` 与 `percent_remaining`；不会用 `credits_used` 推算余额。组织管理的 seat 可能使用共享计费池，个人额度视图不等于组织剩余余额。
-- **凭据与存储**：GLM 的 `llm-pi-ai` `apiKeyEnv` 引用和 Copilot OAuth grant 由 DSH 宿主解析并用于 HTTPS 请求。浏览器只接收归一化额度字段；插件不把 key、OAuth grant 或原始服务商响应写入磁盘，也不保存额度历史。自动用卡的开关与阈值是例外：它们保存在前述宿主设置文件中。
+- **凭据与存储**：GLM 的 `llm-pi-ai` `apiKeyEnv` 引用和 Copilot OAuth grant 由 DSH 宿主解析并用于 HTTPS 请求。浏览器只接收归一化额度字段；插件不把 key、OAuth grant 或原始服务商响应写入磁盘，也不保存额度历史。两处已知的宿主侧落盘例外：历史版本自动用卡开关文件仅作为退役覆盖保留（恒为全关）；手动用卡的结果记录只含尝试标识、卡种、时间与状态，不含任何凭据或服务商卡编号。
 - **路由保护**：API 路由只接受 loopback 或已配对浏览器的同源请求，并禁用缓存。
 - **公开包检查**：npm 包使用显式 `files` allowlist；CI 的 `npm run security:check` 扫描工作树与由 allowlist 推导的候选打包文件，诊断仅报告路径和规则名，不打印匹配值。
 - **服务商限制**：Copilot quota endpoint 和 GLM 重置卡接口均不是稳定的公开契约，字段或行为可能变化；无法确认额度含义时，插件会显示不可用，而不会自行推算。
@@ -96,6 +88,6 @@ DSH Quota Watch displays provider-reported quota snapshots for GLM Coding Plan a
 
 Install for a DSH Web or Desktop profile from the DSH plugin marketplace. Both profiles have been manually verified; the CLI install commands are shown above.
 
-**Reset cards are optional, irreversible spending.** They are supported only for domestic `zai-coding-cn` personal plans. Automatic use is separately authorized per window and defaults off. The upstream reset-card APIs are undocumented and may change; an ambiguous timeout may still have consumed a card, so verify the provider state before retrying.
+**Reset cards are optional, irreversible spending.** They are supported only for domestic `zai-coding-cn` personal plans, and only through an explicitly confirmed manual flow. Automatic card use has been removed: at startup the host durably retires any legacy saved authorization, so rolling back to an older release cannot revive it. The host journals every attempt before the irreversible POST; an ambiguous result (timeout, non-200, lost response) keeps manual use locked until you explicitly verify, and a known outcome that fails to reach the browser persists as a receipt until you acknowledge it — a lost browser request is never reported as a confirmed failure. The upstream reset-card APIs are undocumented and may change.
 
 All screenshots contain synthetic example data.

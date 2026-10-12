@@ -13,6 +13,9 @@ _Avoid_: Billing period (unless the provider specifically defines a calendar bil
 **Quota observation**: A point-in-time reading of a provider-reported quota. It is not a continuous event stream and may lag the provider's underlying accounting.
 _Avoid_: Real-time usage (when implying per-request precision)
 
+**Stale provider observation**: A previously successful quota or usage reading retained after a subsequent attempt to refresh that same reading failed. Showing the last successful reading between scheduled polls is ordinary caching, not this failure state.
+_Avoid_: Cached reading (as a synonym for stale), live data
+
 **GitHub AI Credits**: GitHub's current Copilot usage-billing unit, distinct from the legacy Premium Requests allowance. Credits are accounted for by the relevant billing entity; an organization-managed seat does not by itself create an individually reserved balance.
 _Avoid_: Premium requests (as a synonym for AI Credits), seat balance (unless separately defined)
 
@@ -34,11 +37,13 @@ _Avoid_: Calling it a quota; session usage; treating the interval as a rolling w
 **Reset card**: An expiring, provider-granted entitlement that can be redeemed once to clear an eligible quota window; a weekly reset card also clears the five-hour window. It is not the quota window or its remaining percentage.
 _Avoid_: Quota balance, free refresh
 
-**Card redemption**: The irreversible consumption of one reset card, distinct from querying a card count or refreshing a quota observation.
+**Card redemption**: The irreversible consumption of one reset card, distinct from querying a card count or refreshing a quota observation. In the current capability set it happens only through the explicitly confirmed manual flow; the retired automatic policy is kept as a historical term below.
 _Avoid_: Refresh, re-probe
+**Automatic card use (retired)**: A formerly separately authorized policy that redeemed a reset card when a fresh quota observation met the chosen window's trigger. Retired by ADR 0004: no live code path can authorize or execute it, and the term survives only for reading historical decisions and the legacy settings file that the startup retirement forces off.
+_Avoid_: Describing it as an active capability; automatic refresh
 
-**Automatic card use**: A separately authorized policy that redeems a reset card when a fresh quota observation meets the chosen window's trigger. Merely expanding the automatic-use controls is not that authorization.
-_Avoid_: Automatic refresh, auto-visible controls
+**Manual outcome journal**: The host-side single-entry record of one manual card redemption, durably written before the irreversible POST and kept until the user verifies an unknown outcome or acknowledges a known one. It carries only an opaque attempt id, card type, start time and status — never credentials or provider card ids.
+_Avoid_: Log file (implies diagnostics), retry queue
 
 ### UI surfaces
 
@@ -50,9 +55,10 @@ _Avoid_: floating ball, ball, floating window, FAB, widget, mini mode, context m
 The capsule's position persistence behavior where user-placed coordinates {x, y} are remembered across sessions, with the element's measured geometry kept clamped inside viewport boundaries and safe-area margins.
 _Avoid_: edge docking (retired), magnetic snap, peek, unconstrained coordinates
 
+
 **Panel**:
-The floating detail surface opened from the capsule or a card row; it renders the quota overview and per-provider detail views, with a footer grid of two equal-width buttons — the sidebar-card toggle and a manual refresh — that replaced the retired capsule context menu.
-_Avoid_: popup, pop (implementation class name only), modal, context menu
+The floating surface opened from the capsule or a card row, containing the quota overview and per-provider detail views; it is not a separate navigable page.
+_Avoid_: page, popup, pop (implementation class name only), modal, context menu
 
 **Sidebar card (card)**:
 The opportunistic entry rendered in the DSH web sidebar footer when that mount point exists; it is silently absent when the point does not (collapsed sidebar, desktop profile).
