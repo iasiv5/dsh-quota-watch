@@ -762,7 +762,14 @@ export function createQuotaService(ctx, options = {}) {
     }
     const listed = await listResetCards()
     if (listed.ok !== true) {
-      return { ok: false, error: 'verify-failed', message: '核实失败：无法重新读取重置卡列表，记录保持锁定' }
+      // Surface the truthful reason (e.g. an international provider answering
+      // 仅支持国内站个人版) instead of a generic wallet error; the record and
+      // the lock stay put either way.
+      return {
+        ok: false,
+        error: 'verify-failed',
+        message: `核实失败：${listed.message ?? '无法重新读取重置卡列表'}，记录保持锁定`,
+      }
     }
     try {
       manualJournal.acknowledgeUnknown(attemptId)

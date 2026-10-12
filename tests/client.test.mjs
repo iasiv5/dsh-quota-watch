@@ -1972,6 +1972,44 @@ test('the capsule warning label matches the pending outcome kind', async (t) => 
   assert.doesNotMatch(label, /未确认/)
 })
 
+// --- Review round-2 R1-2: the manual flow locks client-side too ----------------
+
+test('an unreadable journal or pending outcome locks the spend buttons client-side', async (t) => {
+  for (const extra of [
+    { manualOutcomeError: 'storage-unavailable' },
+    { manualOutcome: { attemptId: 'att-lock', resetType: 'WEEK', startedAt: 1, status: 'unknown' } },
+  ]) {
+    const window = dom({ locale: 'zh-CN' })
+    const payload = {
+      ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
+      reset: { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } },
+      ...extra,
+    }
+    const requests = []
+    const fetchImpl = async (path, init = {}) => {
+      requests.push({ path: String(path), method: init?.method ?? 'GET' })
+      return response(payload)
+    }
+    const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+    try {
+      await turn()
+      await openPanelGlm(window)
+      const use = floatPanel(window).querySelector('.dqw-reset-use')
+      assert.ok(use, String(JSON.stringify(extra)))
+      assert.equal(use.disabled, true, `the spend button is locked: ${JSON.stringify(extra)}`)
+      // Even a synthetic dispatch on the disabled control must not start a spend.
+      use.dispatchEvent(new window.MouseEvent('click', { bubbles: true, cancelable: true }))
+      await turn()
+      await turn()
+      // The unknown-outcome block legitimately reuses .dqw-reset-confirm as a
+      // container; the confirm DIALOG is identified by its primary action.
+      assert.equal(floatPanel(window).querySelector('.dqw-reset-confirm .dqw-reset-btn.is-primary'), null, 'no confirm dialog appears')
+      assert.equal(floatPanel(window).querySelector('.dqw-reset-use').textContent, '重置', 'the use button never flipped to cancel')
+      assert.equal(requests.some((row) => row.path.endsWith('/reset-cards/use')), false, 'zero spend POST')
+    } finally { dispose(); window.close() }
+  }
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()

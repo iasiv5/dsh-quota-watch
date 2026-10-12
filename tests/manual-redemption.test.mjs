@@ -430,6 +430,24 @@ test('an in-flight POST cannot be acknowledged through either route', async (t) 
   assert.equal((await pending).ok, true)
 })
 
+test('an acknowledgement against an international provider reports the real reason and stays locked', async (t) => {
+  const manualOutcomePath = tempOutcomePath(t)
+  const first = makeService(t, { use: 'reject', manualOutcomePath })
+  const spent = await first.service.useResetCard({ resetType: 'WEEK' })
+  assert.equal(spent.error, 'request-unknown')
+  first.service.stop()
+
+  // The provider switches to the international route: the fresh recheck must
+  // fail with the truthful reason, not a generic wallet error, and keep the lock.
+  const switched = makeService(t, { providerId: 'zai', manualOutcomePath })
+  const ack = makeResetAcknowledgeRoute(routeCtx(), switched.service)
+  const result = await invoke(ack, postRequest({ body: { attemptId: spent.attemptId } }))
+  assert.equal(result.status, 502)
+  assert.equal(result.body.error, 'verify-failed')
+  assert.match(result.body.message, /仅支持国内站/, 'the real cause is surfaced')
+  assert.equal(switched.service.overview().manualOutcome.status, 'unknown', 'the record stays locked')
+})
+
 // --- Task 6: manual/wallet cases migrated from the retired auto-reset file ---
 
 test('a manual spend waits for an in-flight background wallet read before using a live card', async (t) => {

@@ -1001,6 +1001,13 @@ export function mountQuotaCard({
     panel.append(overviewActions())
   }
 
+  /** True while the host journal is unreadable or any outcome record is
+   * unresolved: manual spending is locked at the UI, in the click handlers and
+   * in the send path itself (the host refuses regardless — defense in depth). */
+  function manualLocked() {
+    return snapshot?.manualOutcome !== undefined || snapshot?.manualOutcomeError !== undefined
+  }
+
   /**
    * Spend one card.
    * The confirmation is cleared first so a double click cannot fire twice, and the
@@ -1010,7 +1017,7 @@ export function mountQuotaCard({
    * failure — the persistent snapshot warning takes over instead.
    */
   async function spendResetCard(resetType) {
-    if (resetBusy !== undefined || disposed) return
+    if (resetBusy !== undefined || disposed || manualLocked()) return
     resetBusy = resetType
     resetPending = undefined
     resetNotice = undefined
@@ -1159,14 +1166,15 @@ export function mountQuotaCard({
     button.textContent = resetPending === type ? copy.resetCards.cancel : copy.resetCards.use
     // While this window's request is in flight the card may already be spent, so the
     // button is fully disabled (not just click-guarded) for the whole round trip.
+    // An unreadable journal or any unresolved outcome record locks it just as hard.
     if (resetBusy === type) {
       button.textContent = copy.resetCards.working
       button.disabled = true
     } else {
-      button.disabled = resetBusy !== undefined
+      button.disabled = resetBusy !== undefined || manualLocked()
     }
     button.addEventListener('click', () => {
-      if (resetBusy !== undefined) return
+      if (resetBusy !== undefined || manualLocked()) return
       resetPending = resetPending === type ? undefined : type
       resetNotice = undefined
       syncPop()
@@ -1246,9 +1254,10 @@ export function mountQuotaCard({
       confirm.type = 'button'
       confirm.className = 'dqw-reset-btn is-primary'
       confirm.textContent = copy.resetCards.ok
-      // Disabled while a spend is in flight: double clicks cannot queue a
+      // Disabled while a spend is in flight or the manual flow is locked by an
+      // unresolved outcome / unreadable journal: double clicks cannot queue a
       // second irreversible POST.
-      confirm.disabled = resetBusy !== undefined
+      confirm.disabled = resetBusy !== undefined || manualLocked()
       confirm.addEventListener('click', () => { spendResetCard(resetPending) })
       actions.append(cancel, confirm)
       box.append(actions)
