@@ -1339,13 +1339,19 @@ function glmDetailText(window) {
 }
 
 async function openPanelGlm(window) {
-  const panel = floatPanel(window)
-  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
+  let panel = floatPanel(window)
+  // The capsule is a toggle: only click it when the panel is actually hidden.
+  if (panel.hidden) {
+    floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    panel = floatPanel(window)
+  }
+  // Already on the GLM detail (e.g. right after Esc cleared a confirm): done.
+  if (panel.dataset.dshQuotaWatchPanelDetail === 'glm') return panel
   panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   await turn()
   await turn()
-  return panel
+  return floatPanel(window)
 }
 
 // glmDetailText is the hoisted function declared beside the Task 10 helpers.
@@ -1581,6 +1587,106 @@ test('the earliest expiry label, its focusable detail and host picking share one
   assert.doesNotMatch(accessible, /官方已/, 'it never claims official confirmation')
   dispose()
   window.close()
+})
+
+// --- Task 13: confirm/cancel semantics ----------------------------------------
+
+async function openConfirmBox(window) {
+  await openPanelGlm(window)
+  floatPanel(window).querySelector('.dqw-reset-use').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  return floatPanel(window).querySelector('.dqw-reset-confirm')
+}
+
+test('the confirm box names the card type, both affected windows and irreversibility', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+  const { dispose } = await mounted(window, resetSnapshot(wallet))
+  try {
+    const confirmBox = await openConfirmBox(window)
+    assert.ok(confirmBox)
+    assert.match(confirmBox.textContent, /5 小时/)
+    assert.match(confirmBox.textContent, /无法撤销/)
+    dispose(); window.close()
+
+    const weekly = dom({ locale: 'zh-CN' })
+    const weekWallet = { status: 'ready', cards: { fiveHour: [], week: [{ recordId: 8, expireTime: '2026-12-01 09:00:00' }] } }
+    const { dispose: disposeWeekly } = await mounted(weekly, resetSnapshot(weekWallet))
+    const weekBox = await openConfirmBox(weekly)
+    assert.ok(weekBox)
+    assert.match(weekBox.textContent, /每周重置卡|每周额度/)
+    assert.match(weekBox.textContent, /5 小时额度/, 'a weekly card names the 5h window it also clears')
+    assert.match(weekBox.textContent, /无法撤销/)
+    disposeWeekly(); weekly.close()
+  } finally { /* disposed above */ }
+})
+
+test('Esc and closing clear only an uncommitted confirmation; re-entry is clean and sends nothing', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    requests.push({ path: String(path), method: init?.method ?? 'GET' })
+    return response(resetSnapshot(wallet))
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    let confirmBox = await openConfirmBox(window)
+    assert.ok(confirmBox, 'the inline confirm appears')
+
+    window.document.body.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await turn()
+    assert.equal(floatPanel(window).querySelector('.dqw-reset-confirm'), null, 'Esc clears the uncommitted confirm')
+    const detailAfterEsc = window.document
+      .querySelector('[data-dsh-quota-watch-float]')
+      .shadowRoot
+      .querySelector('[data-dsh-quota-watch-panel-detail="glm"]')
+    assert.ok(detailAfterEsc, 'the detail stays open')
+
+    confirmBox = await openConfirmBox(window)
+    assert.ok(confirmBox, 're-entering shows a fresh confirm, never the old one')
+
+    floatPanel(window).querySelector('[data-action="panel-close"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    assert.equal(floatPanel(window).querySelector('.dqw-reset-confirm'), null, 'closing clears it too')
+    await openPanelGlm(window)
+    assert.equal(floatPanel(window).querySelector('.dqw-reset-confirm'), null, 'nothing resurrects the old confirm')
+    assert.equal(requests.filter((row) => row.method === 'POST').length, 0, 'cancelling never sends a POST')
+  } finally { dispose(); window.close() }
+})
+
+test('double-confirming fires exactly one spend POST and the result still lands', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+  let releaseUse
+  const useGate = new Promise((resolve) => { releaseUse = resolve })
+  let useCalls = 0
+  const fetchImpl = async (path, init = {}) => {
+    const target = String(path)
+    if (target.endsWith('/reset-cards/use')) {
+      useCalls += 1
+      await useGate
+      return response({ ok: true, message: '操作成功', attemptId: 'synthetic-attempt' })
+    }
+    return response(resetSnapshot(wallet))
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    await openConfirmBox(window)
+    const confirmButton = floatPanel(window).querySelector('.dqw-reset-btn.is-primary')
+    assert.ok(confirmButton)
+    // Two synchronous clicks: only the first may reach the host.
+    confirmButton.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    confirmButton.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    for (let hop = 0; hop < 3; hop += 1) await turn()
+    assert.equal(useCalls, 1, 'the in-flight POST cannot be double-fired')
+    releaseUse()
+    for (let hop = 0; hop < 4; hop += 1) await turn()
+    assert.equal(useCalls, 1, 'still exactly one spend after the answer arrives')
+    assert.match(glmDetailText(window), /已重置/)
+  } finally { dispose(); window.close() }
 })
 
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {

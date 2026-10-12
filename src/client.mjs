@@ -1118,6 +1118,9 @@ export function mountQuotaCard({
       confirm.type = 'button'
       confirm.className = 'dqw-reset-btn is-primary'
       confirm.textContent = copy.resetCards.ok
+      // Disabled while a spend is in flight: double clicks cannot queue a
+      // second irreversible POST.
+      confirm.disabled = resetBusy !== undefined
       confirm.addEventListener('click', () => { spendResetCard(resetPending) })
       actions.append(cancel, confirm)
       box.append(actions)
@@ -1589,11 +1592,15 @@ export function mountQuotaCard({
       return
     }
     if (event.target?.closest?.('[data-action="panel-close"]')) {
+      // Closing only ever discards an UNCOMMITTED confirmation; a POST that is
+      // already in flight keeps waiting for its result (resetBusy untouched).
+      resetPending = undefined
       openKey = undefined
       syncPop()
       return
     }
     if (event.target?.closest?.('[data-action="back-to-overview"]')) {
+      resetPending = undefined
       openKey = 'overview'
       syncPop()
       return
@@ -1632,6 +1639,8 @@ export function mountQuotaCard({
     const target = event.target
     if (target === panel || target === container) return
     if (target?.getRootNode?.() === cardRoot || target?.getRootNode?.() === floatRoot) return
+    // Same rule as panel-close: only an uncommitted confirmation dies here.
+    resetPending = undefined
     openKey = undefined
     renderAll()
   }
@@ -1653,6 +1662,14 @@ export function mountQuotaCard({
   const onDocKeydown = (event) => {
     if (event.key !== 'Escape') return
     if (openKey !== undefined) {
+      // An uncommitted confirmation dies first and the detail stays open; an
+      // in-flight POST cannot be cancelled and simply keeps waiting for its
+      // result. A second Esc then closes the panel.
+      if (openKey === 'glm' && resetPending !== undefined) {
+        resetPending = undefined
+        renderAll()
+        return
+      }
       openKey = undefined
       renderAll()
     }
