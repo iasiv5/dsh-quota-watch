@@ -553,6 +553,9 @@ export function mountQuotaCard({
   pollIntervalMs = CLIENT_POLL_INTERVAL_MS,
   retryNoDataMs = 2_000,
   retryBackoff = 2,
+  // Q16: a confirmed SUCCESS notice lingers about five seconds before the
+  // panel returns to the latest inventory. Injectable for tests.
+  outcomeNoticeMs = 5_000,
 } = {}) {
   if (!doc?.body || typeof fetchImpl !== 'function') return () => {}
   if (doc.querySelector(CARD_SELECTOR) || doc.querySelector(FLOAT_SELECTOR)) return () => {}
@@ -827,6 +830,7 @@ export function mountQuotaCard({
   let resetBusy           // reset type currently being spent, or undefined
   let resetNotice         // { kind: 'ok' | 'error' | 'unknown', message, attemptId?, known? }
   let outcomeBusy = false // an acknowledge/receipt request is in flight
+  let outcomeNoticeTimer  // the ~5s success-notice timer (Q16)
   // Force/ordinary refresh watermark. An ordinary GET may only apply when it
   // started while NO force was in flight AND under the current force
   // generation — so a force result can neither be dropped by a later-started
@@ -1038,6 +1042,19 @@ export function mountQuotaCard({
     // clear. A failed confirmation keeps the persistent receipt and the lock.
     if (!disposed && resetNotice?.known === true && typeof resetNotice.attemptId === 'string') {
       await acknowledgeOutcome(CLIENT_ROUTES.resetReceipt, resetNotice.attemptId)
+    }
+    // Q16: a confirmed SUCCESS lingers only about five seconds — the wallet
+    // already returned to the latest inventory, and the notice follows.
+    // Refusals and the persistent outcome warning stay until the user acts.
+    if (!disposed && resetNotice?.kind === 'ok') {
+      const notice = resetNotice
+      outcomeNoticeTimer = win.setTimeout(() => {
+        outcomeNoticeTimer = undefined
+        if (!disposed && resetNotice === notice) {
+          resetNotice = undefined
+          if (openKey === 'glm') syncPop()
+        }
+      }, Math.max(0, outcomeNoticeMs))
     }
   }
 
@@ -1478,7 +1495,18 @@ export function mountQuotaCard({
       .map((model) => `${model.label} ${formatPercent(model.percent, locale)}`)
       .join(' · ')
     let label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
-    if (pendingOutcome) label = `${label} · ${copy.resetCards.outcomeUnknownTitle}`
+    if (pendingOutcome) {
+      // The warning wording must match the pending kind: an unreadable record
+      // or an unknown outcome is genuinely "unconfirmed", while a known
+      // receipt already carries the real result.
+      const outcome = snapshot?.manualOutcome
+      const suffix = outcome?.status === 'known-success'
+        ? copy.resetCards.knownSuccessTitle
+        : outcome?.status === 'known-refused'
+          ? copy.resetCards.knownRefusedTitle
+          : copy.resetCards.outcomeUnknownTitle
+      label = `${label} · ${suffix}`
+    }
     surface.setAttribute('aria-label', label)
     surface.title = label
     applyPosition()
@@ -1825,6 +1853,8 @@ export function mountQuotaCard({
   return () => {
     disposed = true
     stopPolling()
+    if (outcomeNoticeTimer !== undefined) win.clearTimeout(outcomeNoticeTimer)
+    outcomeNoticeTimer = undefined
     observer.disconnect()
     langObserver?.disconnect()
     doc.removeEventListener('visibilitychange', onVisibilityChange)

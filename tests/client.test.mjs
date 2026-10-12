@@ -1691,7 +1691,7 @@ test('double-confirming fires exactly one spend POST and the result still lands'
 
 // --- Task 14: outcome presentation and delivery confirmation ------------------
 
-function outcomeHarness(t, { providers = 'domestic', use = { ok: true, attemptId: 'att-x' }, receipt = 'ok', acknowledge = 'ok', overviewExtra, pollIntervalMs = 60_000 } = {}) {
+function outcomeHarness(t, { providers = 'domestic', use = { ok: true, attemptId: 'att-x' }, receipt = 'ok', acknowledge = 'ok', overviewExtra, pollIntervalMs = 60_000, outcomeNoticeMs = 5_000 } = {}) {
   const window = dom({ locale: 'zh-CN' })
   const state = { providers, spent: false, cleared: false, recovered: false, receiptCalls: [], ackCalls: [], useCalls: 0 }
   const providerList = () => {
@@ -1729,7 +1729,7 @@ function outcomeHarness(t, { providers = 'domestic', use = { ok: true, attemptId
     }
     return response(payloadFor())
   }
-  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs })
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs, outcomeNoticeMs })
   t.after(() => { dispose(); window.close() })
   return { window, state, requests }
 }
@@ -1933,6 +1933,38 @@ test('立即刷新 shares one busy state: single flight, disabled button, no ext
     assert.equal(refreshBtn().textContent, '立即刷新')
     assert.equal(floatPanel(window).querySelector('.dqw-toast'), null, 'no extra toast is added')
   } finally { dispose(); window.close() }
+})
+
+// --- Review R1: success-notice pacing and capsule label wording ---------------
+
+test('a confirmed success notice clears after about five seconds; refusals persist', async (t) => {
+  const h = outcomeHarness(t, { use: { ok: true, message: '操作成功', attemptId: 'att-5' }, receipt: 'ok', outcomeNoticeMs: 30 })
+  await turn()
+  await confirmSpend(h.window)
+  assert.match(glmDetailText(h.window), /已重置/)
+  let cleared = false
+  for (let hop = 0; hop < 200 && !cleared; hop += 1) {
+    await turn()
+    cleared = !/已重置/.test(glmDetailText(h.window))
+  }
+  assert.ok(cleared, 'the success notice returns to the latest inventory after the injected ~5s window')
+
+  const refused = outcomeHarness(t, { use: { ok: false, error: 'rejected', message: '指定的重置次数不可用', attemptId: 'att-6' }, receipt: 'ok', outcomeNoticeMs: 30 })
+  await turn()
+  await confirmSpend(refused.window)
+  for (let hop = 0; hop < 20; hop += 1) await turn()
+  assert.match(glmDetailText(refused.window), /不可用/, 'a refusal stays until the user acts')
+})
+
+test('the capsule warning label matches the pending outcome kind', async (t) => {
+  const h = outcomeHarness(t, {
+    providers: 'missing',
+    overviewExtra: { manualOutcome: { attemptId: 'att-7', resetType: 'WEEK', startedAt: 1, status: 'known-success' } },
+  })
+  await turn()
+  const label = capsuleSurface(h.window).getAttribute('aria-label') ?? ''
+  assert.match(label, /已确认成功/, 'a known receipt says so, not "unconfirmed"')
+  assert.doesNotMatch(label, /未确认/)
 })
 
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
