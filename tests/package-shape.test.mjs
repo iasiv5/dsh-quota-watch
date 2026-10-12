@@ -39,6 +39,29 @@ test('client export and quality scripts are defined', () => {
   assert.ok(!packageJson.files.some((path) => path.includes('.npmrc') || path.includes('credentials')))
 })
 
+test('service-constructing tests build exclusively through the isolated helper', async () => {
+  const testsDir = resolve(root, 'tests')
+  // auto-reset.test.mjs is retired by a later task; manual-redemption.test.mjs
+  // is created by one — missing files simply drop out of the guarded set.
+  for (const name of ['host.test.mjs', 'auto-reset.test.mjs', 'manual-redemption.test.mjs']) {
+    let content
+    try {
+      content = await readFile(resolve(testsDir, name), 'utf8')
+    } catch (error) {
+      if (error?.code === 'ENOENT') continue
+      throw error
+    }
+    assert.ok(
+      !content.includes('createQuotaService('),
+      `${name} must construct services via createIsolatedQuotaService, never the bare factory`,
+    )
+  }
+  const helper = await readFile(resolve(testsDir, 'support', 'isolated-service.mjs'), 'utf8')
+  assert.ok(helper.includes('createQuotaService('), 'the helper is the only test-side importer of the bare factory')
+  assert.ok(helper.includes('legacyAutoSettingsPath'), 'the helper injects the legacy settings path')
+  assert.ok(helper.includes('manualOutcomePath'), 'the helper injects the manual outcome path')
+})
+
 test('Cordis patch and GitHub workflows parse and enforce OIDC publishing', async () => {
   const patch = parse(await readFile(resolve(root, 'cordis.patch.yml'), 'utf8'))
   assert.equal(patch[0].insert[0].id, 'quota-watch')

@@ -1,9 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { dirname, resolve } from 'node:path'
-import { classifyProbeError, createQuotaService, makeOverviewRoute, makeRefreshRoute } from '../src/host.mjs'
+import { dirname, join, resolve } from 'node:path'
+import { classifyProbeError, makeOverviewRoute, makeRefreshRoute } from '../src/host.mjs'
+import { createIsolatedQuotaService } from './support/isolated-service.mjs'
 
 const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 const glmBody = JSON.parse(await readFile(resolve(fixtureDir, 'glm-plan-response.json'), 'utf8'))
@@ -40,7 +43,7 @@ test('one refresh probes both providers with current secrets and returns only no
     seen.push({ url, headers: Object.fromEntries(new Headers(init.headers).entries()) })
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000 })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000 })
 
   await service.refresh()
   const overview = service.overview()
@@ -76,7 +79,7 @@ test('later refresh resolves rotated credentials instead of reusing old values',
     seen.push({ url, authorization: new Headers(init.headers).get('authorization') })
     return new Response(JSON.stringify(providerBody(url)), { status: 200 })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl })
 
   await service.refresh()
   glmKey = 'synthetic-glm-rotated'
@@ -111,7 +114,7 @@ test('auth failures expose errorKind in the overview snapshot', async () => {
     if (url.includes('api.github.com')) return new Response('unauthorized', { status: 401 })
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl })
   await service.refresh()
 
   const copilot = service.overview().providers.find((provider) => provider.key === 'copilot')
@@ -127,7 +130,7 @@ test('probe failures retain last-good quota and report stale status without clea
     if (failing) return new Response('{}', { status: 503 })
     return new Response(JSON.stringify(providerBody(url)), { status: 200 })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl })
   await service.refresh()
   failing = true
   await service.refresh()
@@ -152,7 +155,7 @@ test('usage probe failure keeps the plan ready and degrades only the usage block
     if (usageFailing && url.includes('model-usage')) return new Response('{}', { status: 500 })
     return new Response(JSON.stringify(providerBody(url)), { status: 200 })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl })
   await service.refresh()
   usageFailing = true
   await service.refresh()
@@ -172,7 +175,7 @@ test('usage probe failure without last-good data reports an error block, not a r
     JSON.stringify(url.includes('model-usage') ? { success: false } : providerBody(url)),
     { status: 200 },
   )
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl })
   await service.refresh()
 
   const glm = service.overview().providers.find((provider) => provider.key === 'glm')
@@ -190,7 +193,7 @@ test('missing credentials are reported without making provider requests', async 
     credentials: { resolve: async () => undefined, readRecord: async () => undefined },
   }
   let calls = 0
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl: async () => { calls += 1; throw new Error('unexpected fetch') } })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl: async () => { calls += 1; throw new Error('unexpected fetch') } })
   await service.refresh()
 
   assert.equal(calls, 0)
@@ -214,7 +217,7 @@ test('probe state transitions are logged once per real transition with kind-awar
     if (usageFailing && url.includes('model-usage')) return new Response('{}', { status: 500 })
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const service = createQuotaService(context, {
+  const service = createIsolatedQuotaService(context, {
     fetchImpl,
     logMirror: { warn: (line) => mirror.warn.push(line), info: (line) => mirror.info.push(line) },
   })
@@ -255,7 +258,7 @@ test('missing credentials log an informational transition without probing', asyn
   const { logs, logger } = recordingLogger()
   const context = makeContext({ glmKey: '', githubOAuth: '', logger })
   let calls = 0
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl: async () => { calls += 1; throw new Error('unexpected fetch') } })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl: async () => { calls += 1; throw new Error('unexpected fetch') } })
   await service.refresh()
 
   assert.equal(calls, 0)
@@ -345,7 +348,7 @@ test('cold retries back off exponentially and cap at the normal cadence', async 
     if (!String(url).includes('/customer-package-reset/list')) attempts += 1
     throw new Error('still down')
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
   try {
     service.start()
     t.mock.timers.tick(0)
@@ -402,7 +405,7 @@ test('cold retry backoff resets after a successful round and restarts from the s
     if (!glmWorks) throw new Error('glm down')
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
   try {
     service.start()
     t.mock.timers.tick(0)
@@ -449,7 +452,7 @@ test('cold start probes immediately, retries fast while failing, and warms to th
     if (attempts <= 4) throw new Error('network not ready yet')
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
   try {
     service.start()
     t.mock.timers.tick(0)
@@ -486,7 +489,7 @@ test('without credentials the cold interval never engages (no high-frequency pro
     attempts += 1
     return new Response(JSON.stringify(providerBody(url)), { status: 200, headers: { 'content-type': 'application/json' } })
   }
-  const service = createQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
+  const service = createIsolatedQuotaService(context, { logMirror: () => {}, fetchImpl, now: () => 1_800_000_000_000, pollIntervalSec: 60, coldRetryMs: 5_000 })
   try {
     service.start()
     t.mock.timers.tick(0)
@@ -498,6 +501,139 @@ test('without credentials the cold interval never engages (no high-frequency pro
     t.mock.timers.tick(60_000)
     await flush()
     assert.equal(attempts, 0, 'the normal cadence re-checks credentials without network calls')
+  } finally {
+    service.stop()
+    t.mock.timers.reset()
+  }
+})
+
+// --- Task 3: the retired automatic spending path -----------------------------
+
+/** Synthetic GLM plan with BOTH windows at 95% — far past any auto threshold. */
+const highUsagePlan = {
+  success: true,
+  data: {
+    level: 'pro',
+    limits: [
+      { type: 'CREDIT_LIMIT', unit: 3, currentValue: 95, usage: 100, percentage: 95 },
+      { type: 'CREDIT_LIMIT', unit: 6, currentValue: 95, usage: 100, percentage: 95 },
+    ],
+  },
+}
+const syntheticUsage = { success: true, data: { totalUsage: { totalTokensUsage: 10, totalModelCallCount: 2 } } }
+const syntheticCards = {
+  success: true,
+  data: {
+    weekResets: [{ recordId: 9001, grantType: 'DIRECT', expireTime: '2026-12-01 00:00:00', available: true }],
+    fiveHourResets: [{ recordId: 8001, grantType: 'DIRECT', expireTime: '2026-12-01 00:00:00', available: true }],
+  },
+}
+
+/** Transport stub answering the full probe surface, recording every request. */
+function recordingFetch({ plan = highUsagePlan } = {}) {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    const target = String(url)
+    calls.push({ url: target, method: init?.method ?? 'GET', body: init?.body })
+    const pick = (value) => new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (target.includes('/api/monitor/usage/quota/limit')) return pick(plan)
+    if (target.includes('model-usage')) return pick(syntheticUsage)
+    if (target.includes('api.github.com')) return pick(copilotBody)
+    if (target.includes('/customer-package-reset/list')) return pick(syntheticCards)
+    return new Response('{}', { status: 404 })
+  }
+  fetchImpl.calls = calls
+  return fetchImpl
+}
+
+function tempLegacySettings(t, document) {
+  const home = mkdtempSync(join(tmpdir(), 'quota-watch-host-'))
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+  const settingsPath = join(home, 'glm-quota-reset', 'settings.json')
+  mkdirSync(dirname(settingsPath), { recursive: true })
+  writeFileSync(settingsPath, `${JSON.stringify(document, null, 2)}\n`)
+  return settingsPath
+}
+
+const spendCalls = (fetchImpl) => fetchImpl.calls.filter((call) => call.url.includes('/customer-package-reset/use'))
+
+test('a saved legacy wallet with both switches enabled never spends a card in the new host', async (t) => {
+  const settingsPath = tempLegacySettings(t, {
+    autoReset: { fiveHour: { enabled: true, threshold: 50 }, week: { enabled: true, threshold: 50 } },
+  })
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), {
+    logMirror: () => {}, fetchImpl, legacyAutoSettingsPath: settingsPath,
+  })
+  try {
+    await service.refresh()
+    await service.refresh()
+    await service.refresh()
+    assert.equal(service.overview().providers.find((provider) => provider.key === 'glm').status, 'ready')
+    assert.equal(spendCalls(fetchImpl).length, 0,
+      'the retired feature cannot spend a card no matter what the saved file says')
+  } finally { service.stop() }
+})
+
+test('start() forces the saved legacy switches off before the first poll and reports success', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const flush = async () => {
+    for (let hop = 0; hop < 8; hop += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  const settingsPath = tempLegacySettings(t, {
+    autoReset: { fiveHour: { enabled: true }, week: { enabled: true, threshold: 90 } },
+  })
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), {
+    logMirror: () => {}, fetchImpl, legacyAutoSettingsPath: settingsPath,
+  })
+  try {
+    service.start()
+    assert.deepEqual(service.legacyAutoRetirement(), { ok: true }, 'the retirement outcome is observable')
+    const onDisk = JSON.parse(readFileSync(settingsPath, 'utf8'))
+    assert.equal(onDisk.autoReset.fiveHour.enabled, false, 'the saved file is overwritten all-off before polling')
+    assert.equal(onDisk.autoReset.week.enabled, false)
+
+    t.mock.timers.tick(0)
+    await flush()
+    assert.ok(fetchImpl.calls.length > 0, 'the first poll still runs after the migration')
+    assert.equal(spendCalls(fetchImpl).length, 0, 'and it never spends')
+  } finally {
+    service.stop()
+    t.mock.timers.reset()
+  }
+})
+
+test('a failed legacy-settings write reports rollback risk without blocking the new host', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const flush = async () => {
+    for (let hop = 0; hop < 8; hop += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  const home = mkdtempSync(join(tmpdir(), 'quota-watch-host-'))
+  t.after(() => rmSync(home, { recursive: true, force: true }))
+  const blocker = join(home, 'blocker')
+  writeFileSync(blocker, 'a plain file blocks the settings directory')
+  const settingsPath = join(blocker, 'settings.json')
+
+  const { logs, logger } = recordingLogger()
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext({ logger }), {
+    fetchImpl, legacyAutoSettingsPath: settingsPath,
+  })
+  try {
+    service.start()
+    const retirement = service.legacyAutoRetirement()
+    assert.equal(retirement.ok, false, 'the failed overwrite is observable')
+    assert.equal(typeof retirement.error, 'string')
+    assert.ok(
+      logs.warn.some((line) => line.includes('legacy auto-reset settings') && line.includes(retirement.error)),
+      logs.warn,
+    )
+
+    t.mock.timers.tick(0)
+    await flush()
+    assert.ok(fetchImpl.calls.length > 0, 'the new host still probes: the write failure only reports rollback risk')
+    assert.equal(spendCalls(fetchImpl).length, 0, 'and it still has no automatic spending path')
   } finally {
     service.stop()
     t.mock.timers.reset()

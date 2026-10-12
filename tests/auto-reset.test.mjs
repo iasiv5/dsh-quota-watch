@@ -15,7 +15,8 @@ import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createQuotaService, readAutoResetSettings, writeAutoResetSettings, resolveAutoResetSettingsPath } from '../src/host.mjs'
+import { readAutoResetSettings, writeAutoResetSettings, resolveAutoResetSettingsPath } from '../src/host.mjs'
+import { createIsolatedQuotaService } from './support/isolated-service.mjs'
 import { normalizeAutoResetConfig, autoResetConfigFor, AUTO_RESET_DEFAULT_THRESHOLD } from '../src/core/reset.mjs'
 
 const WEEK_AT_95 = {
@@ -82,9 +83,9 @@ function stubCtx(logs = []) {
 test('overview exposes auto-reset state for BOTH windows without throwing', () => {
   // Directly covers the crash: reading the view resolved config by the plan-window
   // key ('5h'), which does not exist in the config namespace ('fiveHour').
-  const service = createQuotaService(stubCtx(), {
+  const service = createIsolatedQuotaService(stubCtx(), {
     fetchImpl: stubFetch(),
-    autoResetSettingsPath: tempSettingsPath().path,
+    legacyAutoSettingsPath: tempSettingsPath().path,
     autoReset: { fiveHour: { enabled: true, threshold: 70 }, week: { enabled: false, threshold: 90 } },
   })
   const view = service.overview()
@@ -98,9 +99,9 @@ test('overview exposes auto-reset state for BOTH windows without throwing', () =
 
 test('a full poll round with auto-reset enabled never rejects', async () => {
   const logs = []
-  const service = createQuotaService(stubCtx(logs), {
+  const service = createIsolatedQuotaService(stubCtx(logs), {
     fetchImpl: stubFetch(),
-    autoResetSettingsPath: tempSettingsPath().path,
+    legacyAutoSettingsPath: tempSettingsPath().path,
     autoReset: { fiveHour: { enabled: true }, week: { enabled: true } },
   })
   // The crash surfaced here: refresh() awaits maybeAutoReset() on the poll timer,
@@ -114,9 +115,9 @@ test('a full poll round with auto-reset enabled never rejects', async () => {
 test('an enabled window over its threshold spends exactly one card and disarms', async () => {
   const logs = []
   const fetchImpl = stubFetch()
-  const service = createQuotaService(stubCtx(logs), {
+  const service = createIsolatedQuotaService(stubCtx(logs), {
     fetchImpl,
-    autoResetSettingsPath: tempSettingsPath().path,
+    legacyAutoSettingsPath: tempSettingsPath().path,
     autoReset: { fiveHour: { enabled: false }, week: { enabled: true, threshold: 90 } },
   })
   await service.refresh()
@@ -138,9 +139,9 @@ test('an enabled window over its threshold spends exactly one card and disarms',
 
 test('a second poll in the same episode does NOT spend again', async () => {
   const fetchImpl = stubFetch()
-  const service = createQuotaService(stubCtx(), {
+  const service = createIsolatedQuotaService(stubCtx(), {
     fetchImpl,
-    autoResetSettingsPath: tempSettingsPath().path,
+    legacyAutoSettingsPath: tempSettingsPath().path,
     autoReset: { fiveHour: { enabled: false }, week: { enabled: true, threshold: 90 } },
   })
   await service.refresh()
@@ -168,10 +169,10 @@ test('a later episode re-arms once usage falls back below the threshold', async 
     return { ok: false, status: 404, json: async () => ({}) }
   }
 
-  const service = createQuotaService(stubCtx(), {
+  const service = createIsolatedQuotaService(stubCtx(), {
     fetchImpl,
     now: () => clock,
-    autoResetSettingsPath: tempSettingsPath().path,
+    legacyAutoSettingsPath: tempSettingsPath().path,
     autoReset: { fiveHour: { enabled: false }, week: { enabled: true, threshold: 90 } },
   })
   await service.refresh()
@@ -201,9 +202,9 @@ test('a failed spend is recorded and backed off, never thrown', async () => {
     return { ok: false, status: 404, json: async () => ({}) }
   }
   fetchImpl.calls = []
-  const service = createQuotaService(stubCtx(), {
+  const service = createIsolatedQuotaService(stubCtx(), {
     fetchImpl,
-    autoResetSettingsPath: tempSettingsPath().path,
+    legacyAutoSettingsPath: tempSettingsPath().path,
     autoReset: { fiveHour: { enabled: false }, week: { enabled: true, threshold: 90 } },
   })
   await service.refresh()
@@ -216,7 +217,7 @@ test('a failed spend is recorded and backed off, never thrown', async () => {
 
 test('auto-reset disabled by default lists cards but never spends them', async () => {
   const fetchImpl = stubFetch()
-  const service = createQuotaService(stubCtx(), { fetchImpl, autoResetSettingsPath: tempSettingsPath().path })
+  const service = createIsolatedQuotaService(stubCtx(), { fetchImpl, legacyAutoSettingsPath: tempSettingsPath().path })
   await service.refresh()
   const resetCalls = fetchImpl.calls.filter((c) => c.url.includes('customer-package-reset'))
   assert.deepEqual(resetCalls.map((call) => call.url.includes('/list') ? 'list' : 'use'), ['list'],
@@ -235,8 +236,8 @@ test('wallet probe rides the host poll on a ten-minute gate; force bypasses and 
     }
     return healthy(url, init)
   }
-  const service = createQuotaService(stubCtx(), {
-    fetchImpl, now: () => clock, autoResetSettingsPath: tempSettingsPath().path,
+  const service = createIsolatedQuotaService(stubCtx(), {
+    fetchImpl, now: () => clock, legacyAutoSettingsPath: tempSettingsPath().path,
   })
   const listCount = () => healthy.calls.filter((call) => call.url.includes('/customer-package-reset/list')).length
   try {
@@ -288,9 +289,9 @@ function tempSettingsPath() {
 test('a fresh install reports the profile config as the switch source', () => {
   const { dir, path } = tempSettingsPath()
   try {
-    const service = createQuotaService(stubCtx(), {
+    const service = createIsolatedQuotaService(stubCtx(), {
       fetchImpl: stubFetch(),
-      autoResetSettingsPath: path,
+      legacyAutoSettingsPath: path,
       autoReset: { week: { enabled: true, threshold: 80 } },
     })
     const view = service.overview().autoReset
@@ -305,7 +306,7 @@ test('a fresh install reports the profile config as the switch source', () => {
 test('updateAutoResetConfig persists, and a new service reads the saved switches back', () => {
   const { dir, path } = tempSettingsPath()
   try {
-    const first = createQuotaService(stubCtx(), { fetchImpl: stubFetch(), autoResetSettingsPath: path })
+    const first = createIsolatedQuotaService(stubCtx(), { fetchImpl: stubFetch(), legacyAutoSettingsPath: path })
     const result = first.updateAutoResetConfig({
       fiveHour: { enabled: false, threshold: 90 },
       week: { enabled: true, threshold: 92 },
@@ -321,7 +322,7 @@ test('updateAutoResetConfig persists, and a new service reads the saved switches
     assert.equal(onDisk.autoReset.week.threshold, 92)
     assert.deepEqual(readdirSync(dir), ['settings.json'], 'atomic replacement leaves no temp file')
 
-    const second = createQuotaService(stubCtx(), { fetchImpl: stubFetch(), autoResetSettingsPath: path })
+    const second = createIsolatedQuotaService(stubCtx(), { fetchImpl: stubFetch(), legacyAutoSettingsPath: path })
     const view = second.overview().autoReset
     assert.equal(view.source, 'saved')
     assert.equal(view.week.enabled, true)
@@ -335,9 +336,9 @@ test('saved settings override profile config; corrupt settings fail closed inste
   const { dir, path } = tempSettingsPath()
   try {
     writeAutoResetSettings(path, { fiveHour: { enabled: true, threshold: 55 }, week: { enabled: false, threshold: 90 } })
-    const service = createQuotaService(stubCtx(), {
+    const service = createIsolatedQuotaService(stubCtx(), {
       fetchImpl: stubFetch(),
-      autoResetSettingsPath: path,
+      legacyAutoSettingsPath: path,
       autoReset: { fiveHour: { enabled: false, threshold: 90 } },
     })
     assert.equal(service.overview().autoReset.fiveHour.enabled, true, 'saved wins over the profile config')
@@ -347,9 +348,9 @@ test('saved settings override profile config; corrupt settings fail closed inste
     // A truncated/corrupt file must never restore an enabled profile default.
     writeFileSync(path, '{ this is not json', 'utf8')
     assert.equal(readAutoResetSettings(path).week.enabled, false)
-    const recovered = createQuotaService(stubCtx(), {
+    const recovered = createIsolatedQuotaService(stubCtx(), {
       fetchImpl: stubFetch(),
-      autoResetSettingsPath: path,
+      legacyAutoSettingsPath: path,
       autoReset: { week: { enabled: true, threshold: 90 } },
     })
     assert.equal(recovered.overview().autoReset.week.enabled, false)
@@ -362,10 +363,10 @@ test('enabling a window re-arms it and clears its backoff', async () => {
   try {
     let clock = 1_000_000
     const fetchImpl = stubFetch()
-    const service = createQuotaService(stubCtx(), {
+    const service = createIsolatedQuotaService(stubCtx(), {
       fetchImpl,
       now: () => clock,
-      autoResetSettingsPath: path,
+      legacyAutoSettingsPath: path,
       autoReset: { fiveHour: { enabled: false }, week: { enabled: true, threshold: 90 } },
     })
     // Spend once so the window is disarmed and inside its backoff.
@@ -390,7 +391,7 @@ test('a write failure is reported instead of silently pretending success', () =>
   try {
     // A directory where the file should be makes the write fail deterministically.
     mkdirSync(path, { recursive: true })
-    const service = createQuotaService(stubCtx(), { fetchImpl: stubFetch(), autoResetSettingsPath: path })
+    const service = createIsolatedQuotaService(stubCtx(), { fetchImpl: stubFetch(), legacyAutoSettingsPath: path })
     const result = service.updateAutoResetConfig({ fiveHour: { enabled: true }, week: { enabled: false } })
     assert.equal(result.ok, true, 'the switch still applies to this process')
     assert.equal(result.autoReset.fiveHour.enabled, true)
@@ -407,7 +408,7 @@ test('international GLM hides domestic entitlement and rejects direct reset call
     const ctx = stubCtx()
     ctx.settings.describe = () => [{ ns: 'llm-pi-ai', value: { providers: { zai: { apiKeyEnv: 'ZAI_API_KEY' } } } }]
     const fetchImpl = stubFetch()
-    const service = createQuotaService(ctx, { fetchImpl, autoResetSettingsPath: path })
+    const service = createIsolatedQuotaService(ctx, { fetchImpl, legacyAutoSettingsPath: path })
     await service.refresh()
     assert.equal(service.overview().providers.find((item) => item.key === 'glm').providerId, 'zai')
     assert.equal((await service.listResetCards()).error, 'unsupported-provider')
@@ -425,7 +426,7 @@ test('stale quota plans never trigger an auto-spend, even with a live reset endp
     const fetchImpl = (url, init) => failQuota && String(url).includes('/api/monitor/usage/quota/limit')
       ? Promise.resolve({ ok: false, status: 503, json: async () => ({}) })
       : healthy(url, init)
-    const service = createQuotaService(stubCtx(), { fetchImpl, autoResetSettingsPath: path })
+    const service = createIsolatedQuotaService(stubCtx(), { fetchImpl, legacyAutoSettingsPath: path })
     await service.refresh() // A real high-usage snapshot, but auto-use was off.
     service.updateAutoResetConfig({ fiveHour: { enabled: false }, week: { enabled: true, threshold: 90 } })
     failQuota = true
@@ -442,8 +443,8 @@ test('simultaneous high week and 5h usage spends a weekly card only', async () =
     const bothHigh = structuredClone(WEEK_AT_95)
     bothHigh.data.limits[0].currentValue = 95
     const fetchImpl = stubFetch({ plan: bothHigh })
-    const service = createQuotaService(stubCtx(), {
-      fetchImpl, autoResetSettingsPath: path,
+    const service = createIsolatedQuotaService(stubCtx(), {
+      fetchImpl, legacyAutoSettingsPath: path,
       autoReset: { fiveHour: { enabled: true, threshold: 90 }, week: { enabled: true, threshold: 90 } },
     })
     await service.refresh()
@@ -471,7 +472,7 @@ test('manual spend waits for an in-flight background wallet read before using a 
       }
       return healthy(url, init)
     }
-    const service = createQuotaService(stubCtx(), { fetchImpl, autoResetSettingsPath: path })
+    const service = createIsolatedQuotaService(stubCtx(), { fetchImpl, legacyAutoSettingsPath: path })
     const poll = service.refresh()
     await entered
     const manual = service.useResetCard({ resetType: 'WEEK' })
@@ -488,7 +489,7 @@ test('manual spend waits for an in-flight background wallet read before using a 
   } finally { rmSync(dir, { recursive: true, force: true }) }
 })
 
-test('automatic list in flight rejects a simultaneous manual spend', async () => {
+test('a manual spend in flight rejects a simultaneous second manual spend', async () => {
   const { dir, path } = tempSettingsPath()
   try {
     const healthy = stubFetch({ plan: WEEK_AT_95 })
@@ -504,14 +505,17 @@ test('automatic list in flight rejects a simultaneous manual spend', async () =>
       }
       return healthy(url, init)
     }
-    const service = createQuotaService(stubCtx(), {
-      fetchImpl, autoResetSettingsPath: path, autoReset: { week: { enabled: true, threshold: 90 } },
+    const service = createIsolatedQuotaService(stubCtx(), {
+      fetchImpl, legacyAutoSettingsPath: path,
     })
-    const poll = service.refresh()
+    // The spend's own pre-POST re-list is the gated request: the second manual
+    // call must see resetSpendInFlight and refuse, never queue a second POST.
+    const first = service.useResetCard({ resetType: 'WEEK' })
     await entered
     assert.equal((await service.useResetCard({ resetType: 'WEEK' })).error, 'busy')
     releaseList()
-    await poll
+    assert.equal((await first).ok, true)
+    await service.refresh()
     assert.equal(healthy.calls.filter((call) => call.url.includes('customer-package-reset/use')).length, 1)
     service.stop()
   } finally { rmSync(dir, { recursive: true, force: true }) }
@@ -533,8 +537,8 @@ test('manual list in flight blocks automatic spending and disarms on success', a
       }
       return healthy(url, init)
     }
-    const service = createQuotaService(stubCtx(), {
-      fetchImpl, autoResetSettingsPath: path, autoReset: { week: { enabled: true, threshold: 90 } },
+    const service = createIsolatedQuotaService(stubCtx(), {
+      fetchImpl, legacyAutoSettingsPath: path, autoReset: { week: { enabled: true, threshold: 90 } },
     })
     const manual = service.useResetCard({ resetType: 'WEEK' })
     await entered
@@ -564,8 +568,8 @@ test('a switch-off during the automatic list revalidates and sends no spend POST
       }
       return healthy(url, init)
     }
-    const service = createQuotaService(stubCtx(), {
-      fetchImpl, autoResetSettingsPath: path, autoReset: { week: { enabled: true, threshold: 90 } },
+    const service = createIsolatedQuotaService(stubCtx(), {
+      fetchImpl, legacyAutoSettingsPath: path, autoReset: { week: { enabled: true, threshold: 90 } },
     })
     const poll = service.refresh()
     await entered
@@ -591,8 +595,8 @@ test('failed card listing respects the 10-minute auto retry backoff', async () =
       }
       return healthy(url, init)
     }
-    const service = createQuotaService(stubCtx(), {
-      fetchImpl, now: () => clock, autoResetSettingsPath: path,
+    const service = createIsolatedQuotaService(stubCtx(), {
+      fetchImpl, now: () => clock, legacyAutoSettingsPath: path,
       autoReset: { week: { enabled: true, threshold: 90 } },
     })
     await service.refresh()
@@ -618,8 +622,8 @@ test('ambiguous POST result disarms auto-use instead of retrying after backoff',
       }
       return healthy(url, init)
     }
-    const service = createQuotaService(stubCtx(), {
-      fetchImpl, now: () => clock, autoResetSettingsPath: path,
+    const service = createIsolatedQuotaService(stubCtx(), {
+      fetchImpl, now: () => clock, legacyAutoSettingsPath: path,
       autoReset: { week: { enabled: true, threshold: 90 } },
     })
     await service.refresh()

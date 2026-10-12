@@ -19,6 +19,7 @@ import {
   RESET_TIMEOUT_MS,
   windowKeyForResetType,
 } from './core/reset.mjs'
+import { retireLegacyAutoResetSettings } from './core/legacy-auto-settings.mjs'
 import {
   DEFAULT_POLL_INTERVAL_SEC,
   MAX_POLL_INTERVAL_SEC,
@@ -176,7 +177,10 @@ export function createQuotaService(ctx, options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const now = options.now ?? Date.now
   const pollIntervalSec = resolvePollInterval(options.pollIntervalSec)
-  const settingsPath = options.autoResetSettingsPath ?? resolveAutoResetSettingsPath()
+  // The legacy switches file is only ever touched by the one-shot start()-time
+  // retirement below; the poll itself is read-only. Tests must inject an
+  // isolated path so the retirement can never write the real $DSH_HOME.
+  const settingsPath = options.legacyAutoSettingsPath ?? resolveAutoResetSettingsPath()
   // A saved switch wins over the profile config: the panel is the user-facing
   // control, and the profile value is only the initial default.
   const savedAutoReset = readAutoResetSettings(settingsPath)
@@ -197,6 +201,7 @@ export function createQuotaService(ctx, options = {}) {
   const autoResetArmed = { '5h': true, week: true }
   const autoResetLastAttempt = { '5h': undefined, week: undefined }
   let autoResetEvent
+  let legacyRetirement
 
   const AUTO_RESET_WINDOWS = Object.freeze([['5h', 'fiveHour'], ['week', 'week']])
 
@@ -530,9 +535,8 @@ export function createQuotaService(ctx, options = {}) {
     pollPromise = Promise.all([probeGlm(), probeCopilot()])
       .then(async () => {
         updatedAt = now()
-        // Spending gets priority over the read-only background list: otherwise
-        // two wallet reads could race and a manual spend could slip between them.
-        await maybeAutoReset()
+        // The poll round is strictly read-only since the automatic-use
+        // retirement: no poll path may ever reach the card-consuming endpoint.
         await probeResetCards(forceCards === true)
         return view()
       })
@@ -842,6 +846,17 @@ export function createQuotaService(ctx, options = {}) {
     updateAutoResetConfig,
     start() {
       if (disposed || timer !== undefined) return
+      // One-time retirement of the legacy automatic-use switches, BEFORE any
+      // poll can run: both saved switches are persistently forced off so a
+      // rollback to an old package cannot silently revive the authorization.
+      // A failed write only reports the rollback risk — this host has no
+      // automatic spending path either way, so it must not block startup.
+      legacyRetirement = retireLegacyAutoResetSettings(settingsPath)
+      if (legacyRetirement.ok === true) {
+        logAuto('info', 'quota-watch: legacy auto-reset switches forced off (glm-quota-reset/settings.json)')
+      } else {
+        logAuto('warn', `quota-watch: could not overwrite the legacy auto-reset settings (${legacyRetirement.error}); a rollback to an old version could revive its switches, but this host has no automatic spending path`)
+      }
       // Routes register synchronously in apply() before start(), so probing
       // immediately is safe; the legacy 2s delay only padded the cold start.
       schedule(0)
@@ -851,6 +866,7 @@ export function createQuotaService(ctx, options = {}) {
       if (timer !== undefined) clearTimeout(timer)
       timer = undefined
     },
+    legacyAutoRetirement: () => legacyRetirement,
     pollIntervalSec,
   }
 }
