@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createIsolatedQuotaService } from './support/isolated-service.mjs'
+import { makeResetAcknowledgeRoute, makeResetReceiptRoute } from '../src/host.mjs'
 
 /**
  * Task 4: the manual reset-card spend must durably journal BEFORE its
@@ -49,8 +50,11 @@ function tempOutcomePath(t) {
  *   'nonjson' (HTTP 200 unparseable), 'unclear' (200 without a usable success flag).
  * `onUse` runs when the POST is actually sent (before its answer is produced).
  */
-function makeService(t, { use = USE_OK, onUse, manualOutcomePath } = {}) {
+function makeService(t, { use = USE_OK, plan, list, onUse, manualOutcomePath } = {}) {
   const calls = []
+  // Mutable per-test transport state so a scenario can break an endpoint only
+  // AFTER the spend (e.g. the acknowledgement's fresh recheck must fail).
+  const state = { use, plan, list }
   const fetchImpl = async (url) => {
     const target = String(url)
     calls.push(target)
@@ -60,13 +64,18 @@ function makeService(t, { use = USE_OK, onUse, manualOutcomePath } = {}) {
     )
     if (target.includes('/customer-package-reset/use')) {
       if (onUse) await onUse()
-      if (use === 'reject') throw new Error('connection ended after request was sent')
-      if (use === 'nonjson') return respond({ status: 200, body: 'OK' })
-      if (use === 'unclear') return respond({ status: 200, body: { code: 200, msg: 'no flag' } })
-      return respond(use)
+      const answer = state.use
+      if (answer === 'reject') throw new Error('connection ended after request was sent')
+      if (answer === 'nonjson') return respond({ status: 200, body: 'OK' })
+      if (answer === 'unclear') return respond({ status: 200, body: { code: 200, msg: 'no flag' } })
+      return respond(answer)
     }
-    if (target.includes('/customer-package-reset/list')) return respond({ status: 200, body: CARDS })
-    if (target.includes('/api/monitor/usage/quota/limit')) return respond({ status: 200, body: PLAN })
+    if (target.includes('/customer-package-reset/list')) {
+      return state.list === 'fail' ? new Response('{}', { status: 503 }) : respond({ status: 200, body: CARDS })
+    }
+    if (target.includes('/api/monitor/usage/quota/limit')) {
+      return state.plan === 'fail' ? new Response('{}', { status: 503 }) : respond({ status: 200, body: PLAN })
+    }
     if (target.includes('model-usage')) return respond({ status: 200, body: USAGE })
     if (target.includes('api.github.com')) return new Response('unauthorized', { status: 401 })
     return new Response('{}', { status: 404 })
@@ -80,7 +89,7 @@ function makeService(t, { use = USE_OK, onUse, manualOutcomePath } = {}) {
     { logMirror: () => {}, fetchImpl, ...(manualOutcomePath !== undefined ? { manualOutcomePath } : {}) },
   )
   t.after(() => service.stop())
-  return { service, calls }
+  return { service, calls, state }
 }
 
 function diskRecord(path) {
@@ -239,4 +248,183 @@ test('two concurrent manual requests produce at most one spend', async (t) => {
   const outcomes = [first, second].map((row) => (row.ok === true ? 'spent' : row.error)).sort()
   assert.deepEqual(outcomes, ['busy', 'spent'])
   assert.equal(useCalls(calls).length, 1)
+})
+
+// --- Task 5: protected acknowledgement routes --------------------------------
+
+function fakeResponse() {
+  return {
+    writeHead(status, headers) { this.statusCode = status; this.headers = headers },
+    end(body) { this.body = body },
+  }
+}
+
+function postRequest({ origin = 'https://dsh.example', body = {} } = {}) {
+  const chunks = [Buffer.from(JSON.stringify(body))]
+  return {
+    method: 'POST',
+    socket: { remoteAddress: '198.51.100.24' },
+    headers: { host: 'dsh.example', origin, cookie: 'paired=1' },
+    [Symbol.asyncIterator]() {
+      let index = 0
+      return {
+        next: async () => (index < chunks.length
+          ? { value: chunks[index++], done: false }
+          : { value: undefined, done: true }),
+      }
+    },
+  }
+}
+
+function getRequest(origin = 'https://dsh.example') {
+  return { method: 'GET', socket: { remoteAddress: '198.51.100.24' }, headers: { host: 'dsh.example', origin, cookie: 'paired=1' } }
+}
+
+function routeCtx() {
+  return { remoteWebUiPairing: { isPairedDevice: () => true } }
+}
+
+async function invoke(route, req) {
+  const res = fakeResponse()
+  await route.handler(req, res)
+  return { status: res.statusCode, body: JSON.parse(res.body ?? '{}') }
+}
+
+test('acknowledge and receipt routes are POST-only, exact and same-origin paired', async (t) => {
+  const { service } = makeService(t)
+  const ctx = routeCtx()
+  for (const factory of [makeResetAcknowledgeRoute, makeResetReceiptRoute]) {
+    const route = factory(ctx, service)
+    assert.equal(route.kind, 'exact')
+    assert.ok(route.path.startsWith('/api/dsh-quota-watch/reset-cards/'))
+    assert.equal((await invoke(route, getRequest())).status, 405, 'GET never reaches an acknowledgement')
+    assert.equal((await invoke(route, postRequest({ origin: 'https://attacker.example', body: { attemptId: 'x' } }))).status, 403)
+  }
+})
+
+test('an unknown outcome clears only after a fresh domestic plan and wallet recheck', async (t) => {
+  // A failing plan probe keeps the record locked.
+  const blindPlanPath = tempOutcomePath(t)
+  const failing = makeService(t, { use: 'reject', manualOutcomePath: blindPlanPath })
+  const spentWhileBlind = await failing.service.useResetCard({ resetType: 'WEEK' })
+  assert.equal(spentWhileBlind.error, 'request-unknown')
+  failing.state.plan = 'fail' // the fresh recheck cannot read the plan
+  const acknowledgeBlind = makeResetAcknowledgeRoute(routeCtx(), failing.service)
+  const blind = await invoke(acknowledgeBlind, postRequest({ body: { attemptId: spentWhileBlind.attemptId } }))
+  assert.equal(blind.status, 502)
+  assert.equal(blind.body.error, 'verify-failed')
+  assert.equal(failing.service.overview().manualOutcome.status, 'unknown', 'a failed recheck keeps the lock')
+  failing.service.stop()
+
+  // A failing wallet list keeps the record locked too.
+  const blindListPath = tempOutcomePath(t)
+  const failingList = makeService(t, { use: 'reject', manualOutcomePath: blindListPath })
+  const spentWhileListBlind = await failingList.service.useResetCard({ resetType: 'WEEK' })
+  assert.equal(spentWhileListBlind.error, 'request-unknown')
+  failingList.state.list = 'fail' // the fresh recheck cannot read the wallet
+  const acknowledgeList = makeResetAcknowledgeRoute(routeCtx(), failingList.service)
+  const listBlind = await invoke(acknowledgeList, postRequest({ body: { attemptId: spentWhileListBlind.attemptId } }))
+  assert.equal(listBlind.status, 502)
+  assert.equal(failingList.service.overview().manualOutcome.status, 'unknown')
+  failingList.service.stop()
+
+  // Fresh plan + wallet answers let the user clear the unknown.
+  const clearablePath = tempOutcomePath(t)
+  const { service } = makeService(t, { use: 'reject', manualOutcomePath: clearablePath })
+  const spent = await service.useResetCard({ resetType: 'WEEK' })
+  const acknowledge = makeResetAcknowledgeRoute(routeCtx(), service)
+  const mismatch = await invoke(acknowledge, postRequest({ body: { attemptId: 'wrong-id' } }))
+  assert.equal(mismatch.status, 409, 'a stale attempt id can never clear the current record')
+  const settled = await invoke(acknowledge, postRequest({ body: { attemptId: spent.attemptId } }))
+  assert.equal(settled.status, 200)
+  assert.equal(settled.body.ok, true)
+  assert.equal(service.overview().manualOutcome, undefined, 'the acknowledged record is gone')
+  service.stop()
+
+  // The wallet is spendable again afterwards.
+  const again = makeService(t, { manualOutcomePath: clearablePath })
+  assert.equal((await again.service.useResetCard({ resetType: 'FIVE_HOUR' })).ok, true)
+  assert.equal(useCalls(again.calls).length, 1)
+})
+
+test('a known receipt clears only through the receipt route with the same attemptId', async (t) => {
+  const manualOutcomePath = tempOutcomePath(t)
+  const { service } = makeService(t, { use: USE_REFUSED, manualOutcomePath })
+  const spent = await service.useResetCard({ resetType: 'WEEK' })
+  assert.equal(spent.error, 'rejected')
+  const attemptId = spent.attemptId
+
+  const cross = await invoke(
+    makeResetAcknowledgeRoute(routeCtx(), service),
+    postRequest({ body: { attemptId } }),
+  )
+  assert.equal(cross.status, 409, 'a known receipt cannot be verified away as if it were unknown')
+  assert.equal(service.overview().manualOutcome.status, 'known-refused')
+
+  const receipt = makeResetReceiptRoute(routeCtx(), service)
+  assert.equal((await invoke(receipt, postRequest({ body: { attemptId: 'wrong-id' } }))).status, 409)
+  assert.equal(service.overview().manualOutcome.status, 'known-refused', 'still locked after a wrong id')
+
+  const settled = await invoke(receipt, postRequest({ body: { attemptId } }))
+  assert.equal(settled.status, 200)
+  assert.equal(settled.body.ok, true)
+  assert.equal(service.overview().manualOutcome, undefined)
+  service.stop()
+
+  const again = makeService(t, { manualOutcomePath })
+  assert.equal((await again.service.useResetCard({ resetType: 'FIVE_HOUR' })).ok, true)
+})
+
+test('a lost host→browser use response leaves a receipt the next session can settle', async (t) => {
+  const manualOutcomePath = tempOutcomePath(t)
+  const first = makeService(t, { manualOutcomePath })
+  const spent = await first.service.useResetCard({ resetType: 'WEEK' })
+  assert.equal(spent.ok, true)
+  // ...but the browser never received that response.
+
+  const second = makeService(t, { manualOutcomePath })
+  const overview = second.service.overview()
+  assert.equal(overview.manualOutcome.status, 'known-success')
+  assert.equal(overview.manualOutcome.attemptId, spent.attemptId)
+  const locked = await second.service.useResetCard({ resetType: 'FIVE_HOUR' })
+  assert.equal(locked.error, 'manual-outcome-unresolved')
+  assert.equal(useCalls(second.calls).length, 0, 'the unconfirmed receipt blocks new spending')
+
+  const settle = await invoke(
+    makeResetReceiptRoute(routeCtx(), second.service),
+    postRequest({ body: { attemptId: spent.attemptId } }),
+  )
+  assert.equal(settle.status, 200)
+  assert.equal(second.service.overview().manualOutcome, undefined)
+  second.service.stop()
+
+  const third = makeService(t, { manualOutcomePath })
+  assert.equal((await third.service.useResetCard({ resetType: 'FIVE_HOUR' })).ok, true)
+})
+
+test('an in-flight POST cannot be acknowledged through either route', async (t) => {
+  const manualOutcomePath = tempOutcomePath(t)
+  let releaseUse
+  const gate = new Promise((resolve) => { releaseUse = resolve })
+  const { service } = makeService(t, { manualOutcomePath, onUse: () => gate })
+
+  const pending = service.useResetCard({ resetType: 'WEEK' })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(diskRecord(manualOutcomePath).status, 'in-flight')
+  const attemptId = diskRecord(manualOutcomePath).attemptId
+
+  const acknowledge = await invoke(
+    makeResetAcknowledgeRoute(routeCtx(), service),
+    postRequest({ body: { attemptId } }),
+  )
+  const receipt = await invoke(
+    makeResetReceiptRoute(routeCtx(), service),
+    postRequest({ body: { attemptId } }),
+  )
+  assert.equal(acknowledge.status, 409)
+  assert.equal(receipt.status, 409)
+  assert.equal(diskRecord(manualOutcomePath).status, 'in-flight', 'the live attempt stays untouched')
+
+  releaseUse()
+  assert.equal((await pending).ok, true)
 })

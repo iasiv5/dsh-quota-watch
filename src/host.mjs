@@ -470,12 +470,12 @@ export function createQuotaService(ctx, options = {}) {
     const provider = configuredGlmProvider(ctx)
     if (provider === undefined) {
       markMissing('glm', 'GLM Coding Plan')
-      return
+      return false
     }
     const apiKey = await resolveGlmCredential(ctx, provider)
     if (apiKey === undefined) {
       markMissing('glm', 'GLM Coding Plan')
-      return
+      return false
     }
     try {
       const spec = buildGlmProbe({ provider, apiKey })
@@ -486,9 +486,10 @@ export function createQuotaService(ctx, options = {}) {
       markGlmPlanSuccess(plan, provider)
     } catch (error) {
       markFailure('glm', 'GLM Coding Plan', error)
-      return
+      return false
     }
     await probeGlmUsage(provider, apiKey)
+    return true
   }
 
   async function probeGlmUsage(provider, apiKey) {
@@ -927,6 +928,57 @@ export function createQuotaService(ctx, options = {}) {
     }
   }
 
+  /**
+   * The user says they verified the outcome against the provider: clear an
+   * unknown record — but only after a fresh plan + card-list recheck succeeded,
+   * so the acknowledgement is grounded in current upstream answers. A failed
+   * recheck, a stale id or an in-flight POST keeps the record and the lock.
+   */
+  async function acknowledgeManualOutcome({ attemptId } = {}) {
+    let record
+    try {
+      record = manualJournal.read()
+    } catch {
+      return { ok: false, error: 'storage-unavailable', message: '手动用卡暂不可用：结果记录无法读取' }
+    }
+    if (record === null) return { ok: false, error: 'no-record', message: '没有待核实的手动用卡记录' }
+    if (record.attemptId !== attemptId) return { ok: false, error: 'attempt-mismatch', message: '核实标识不匹配' }
+    if (record.status !== 'unknown') {
+      return { ok: false, error: 'invalid-state', message: '该记录当前不接受用户核实' }
+    }
+    const planReady = await probeGlm()
+    if (planReady !== true) {
+      return { ok: false, error: 'verify-failed', message: '核实失败：无法重新读取 GLM 计划状态，记录保持锁定' }
+    }
+    const listed = await listResetCards()
+    if (listed.ok !== true) {
+      return { ok: false, error: 'verify-failed', message: '核实失败：无法重新读取重置卡列表，记录保持锁定' }
+    }
+    try {
+      manualJournal.acknowledgeUnknown(attemptId)
+    } catch {
+      return { ok: false, error: 'storage-unavailable', message: '核实结果写入失败，记录保持锁定' }
+    }
+    return { ok: true }
+  }
+
+  /** The browser confirmed it received the known outcome: clear that receipt — nothing else, no re-query. */
+  function acknowledgeKnownReceipt({ attemptId } = {}) {
+    try {
+      manualJournal.acknowledgeReceipt(attemptId)
+      return { ok: true }
+    } catch (error) {
+      const code = typeof error?.code === 'string' ? error.code : ''
+      if (code === 'attempt-mismatch' || code === 'no-record') {
+        return { ok: false, error: 'attempt-mismatch', message: '送达确认标识不匹配' }
+      }
+      if (code === 'invalid-transition') {
+        return { ok: false, error: 'invalid-state', message: '该记录当前不接受送达确认' }
+      }
+      return { ok: false, error: 'storage-unavailable', message: '送达确认写入失败，记录保持锁定' }
+    }
+  }
+
   function schedule(delayMs) {
     if (disposed) return
     timer = setTimeout(async () => {
@@ -958,6 +1010,8 @@ export function createQuotaService(ctx, options = {}) {
     refresh,
     listResetCards,
     useResetCard,
+    acknowledgeManualOutcome,
+    acknowledgeKnownReceipt,
     updateAutoResetConfig,
     start() {
       if (disposed || timer !== undefined) return
@@ -1058,6 +1112,69 @@ export function makeResetUseRoute(ctx, service) {
   }
 }
 
+/** Map a failed acknowledgement to a specific HTTP status; the record stays locked either way. */
+function acknowledgementStatus(error) {
+  if (error === 'verify-failed' || error === 'no-provider' || error === 'unsupported-provider'
+    || error === 'no-credential' || error === 'list-failed') return 502
+  if (error === 'storage-unavailable') return 503
+  return 409
+}
+
+/**
+ * The user-verified acknowledgement of an unknown manual outcome.
+ * POST-only with the same origin+pairing fence as the spend route: nothing a
+ * prefetch, link or image can trigger may clear a spend lock. The body is
+ * `{ attemptId }`; an unknown clears only after a fresh domestic plan and card
+ * list recheck succeeded.
+ */
+export function makeResetAcknowledgeRoute(ctx, service) {
+  return {
+    kind: 'exact',
+    path: ROUTES.resetAcknowledge,
+    handler: async (req, res) => {
+      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      const payload = await readJsonBody(req)
+      if (payload === undefined) {
+        responseJson(res, 400, { ok: false, error: 'invalid-body', message: '请求体不是合法 JSON' })
+        return
+      }
+      try {
+        const result = await service.acknowledgeManualOutcome(payload)
+        responseJson(res, result.ok === true ? 200 : acknowledgementStatus(result.error), result)
+      } catch {
+        responseJson(res, 500, { ok: false, error: 'acknowledge-failed', message: '核实请求失败' })
+      }
+    },
+  }
+}
+
+/**
+ * The browser's delivery confirmation for a known manual outcome (success or
+ * refusal). POST-only, same fence; the body is `{ attemptId }` and only the
+ * currently stored known receipt with that id can be cleared. No upstream
+ * request is made: the outcome is already known and durable.
+ */
+export function makeResetReceiptRoute(ctx, service) {
+  return {
+    kind: 'exact',
+    path: ROUTES.resetReceipt,
+    handler: async (req, res) => {
+      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      const payload = await readJsonBody(req)
+      if (payload === undefined) {
+        responseJson(res, 400, { ok: false, error: 'invalid-body', message: '请求体不是合法 JSON' })
+        return
+      }
+      try {
+        const result = service.acknowledgeKnownReceipt(payload)
+        responseJson(res, result.ok === true ? 200 : acknowledgementStatus(result.error), result)
+      } catch {
+        responseJson(res, 500, { ok: false, error: 'receipt-failed', message: '送达确认失败' })
+      }
+    },
+  }
+}
+
 /**
  * Apply the panel's auto-reset switches.
  * POST-only for the same reason as the spend route: this arms automatic spending,
@@ -1109,6 +1226,8 @@ export function apply(ctx, config = {}) {
     ctx.webServer.register(makeRefreshRoute(ctx, service)),
     ctx.webServer.register(makeResetCardsRoute(ctx, service)),
     ctx.webServer.register(makeResetUseRoute(ctx, service)),
+    ctx.webServer.register(makeResetAcknowledgeRoute(ctx, service)),
+    ctx.webServer.register(makeResetReceiptRoute(ctx, service)),
     ctx.webServer.register(makeAutoResetRoute(ctx, service)),
   ]
   service.start()

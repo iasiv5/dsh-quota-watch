@@ -5,7 +5,8 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
-import { classifyProbeError, makeOverviewRoute, makeRefreshRoute } from '../src/host.mjs'
+import { classifyProbeError, makeOverviewRoute, makeRefreshRoute, makeResetAcknowledgeRoute, makeResetReceiptRoute } from '../src/host.mjs'
+import { CLIENT_ROUTES, ROUTES } from '../src/shared.mjs'
 import { createIsolatedQuotaService } from './support/isolated-service.mjs'
 
 const fixtureDir = resolve(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -504,6 +505,28 @@ test('without credentials the cold interval never engages (no high-frequency pro
   } finally {
     service.stop()
     t.mock.timers.reset()
+  }
+})
+
+// --- Task 5: protected acknowledgement routes --------------------------------
+
+test('acknowledge and receipt routes live under the reset-cards namespace as exact routes', () => {
+  assert.equal(ROUTES.resetAcknowledge, '/api/dsh-quota-watch/reset-cards/acknowledge')
+  assert.equal(ROUTES.resetReceipt, '/api/dsh-quota-watch/reset-cards/receipt')
+  assert.equal(CLIENT_ROUTES.resetAcknowledge, 'api/dsh-quota-watch/reset-cards/acknowledge')
+  assert.equal(CLIENT_ROUTES.resetReceipt, 'api/dsh-quota-watch/reset-cards/receipt')
+  const ctx = { remoteWebUiPairing: { isPairedDevice: () => true } }
+  const service = {
+    acknowledgeManualOutcome: async () => ({ ok: true }),
+    acknowledgeKnownReceipt: () => ({ ok: true }),
+  }
+  for (const [factory, path] of [
+    [makeResetAcknowledgeRoute, ROUTES.resetAcknowledge],
+    [makeResetReceiptRoute, ROUTES.resetReceipt],
+  ]) {
+    const route = factory(ctx, service)
+    assert.equal(route.kind, 'exact')
+    assert.equal(route.path, path)
   }
 })
 
