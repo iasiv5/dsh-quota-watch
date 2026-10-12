@@ -1291,6 +1291,34 @@ test('a ready usage snapshot restores the real values after a degraded episode',
   recovered.close()
 })
 
+// --- Task 9: the browser auto-use entry is gone ------------------------------
+
+test('a legacy snapshot carrying autoReset renders no auto-use UI and calls no auto endpoint', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const provider = glmProvider({ providerId: 'zai-coding-cn' })
+  const payload = snapshot([provider, copilotProvider()])
+  payload.autoReset = {
+    fiveHour: { enabled: true, threshold: 90, armed: true },
+    week: { enabled: true, threshold: 90, armed: true },
+    source: 'saved',
+    lastEvent: { kind: 'auto', resetType: 'WEEK', window: 'week', recordId: 9001, at: 1 },
+  }
+  const { dispose, requests } = await mounted(window, payload)
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  assert.doesNotMatch(container.shadowRoot.textContent, /自动用卡/)
+
+  const detail = await openGlmDetail(window)
+  assert.doesNotMatch(detail.textContent, /自动用卡/)
+  assert.equal(detail.querySelector('.dqw-auto'), null)
+  assert.equal(detail.querySelector('.dqw-auto-master'), null)
+  assert.equal(detail.querySelector('.dqw-reset-notice'), null, 'retired auto events never render')
+  assert.equal(detail.querySelectorAll('input[type="checkbox"]').length, 0, 'no authorization switches anywhere')
+  assert.equal(requests.some((request) => String(request.path).includes('auto-reset')), false,
+    'the retired endpoint is never called from the client')
+  dispose()
+  window.close()
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()
@@ -1622,7 +1650,7 @@ test('panel keeps its position across row re-renders and scrolls', async () => {
   window.close()
 })
 
-test('domestic reset section stays three lines, shows Beijing expiry, and persists disclosure only', async () => {
+test('domestic reset section stays two card lines with Beijing expiry and no auto-use controls', async () => {
   const window = dom({ locale: 'zh-CN' })
   const data = { ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
     autoReset: { fiveHour: { enabled: false, threshold: 99.9 }, week: { enabled: true, threshold: 99.9 } } }
@@ -1648,7 +1676,7 @@ test('domestic reset section stays three lines, shows Beijing expiry, and persis
   assert.equal(panel.querySelector('.dqw-reset-reload'), null, '立即刷新 replaces the local button')
   const floatStyle = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('style').textContent
   assert.match(floatStyle, /\.dqw-reset \{ border-top: 1px dashed/, 'expanded reset block retains its divider')
-  assert.match(floatStyle, /\.dqw-auto-grid \{ display: grid; grid-template-columns: max-content max-content 12px minmax\(0, 1fr\)/, 'auto rows share one three-cell alignment grid')
+  assert.doesNotMatch(floatStyle, /\.dqw-auto/, 'the retired auto-use styles are gone')
   const cardRows = [...panel.querySelectorAll('.dqw-reset-row')]
   assert.equal(cardRows.length, 2)
   assert.equal(cardRows[0].querySelector('.dqw-reset-kind').textContent, '5 小时重置卡')
@@ -1657,29 +1685,12 @@ test('domestic reset section stays three lines, shows Beijing expiry, and persis
   assert.equal(cardRows[1].querySelector('.dqw-reset-expiry').textContent, '01/02 前有效')
   assert.ok(panel.querySelector('.dqw-reset-lines'), 'both rows share one alignment grid')
   assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1, 'empty type has no button')
-  assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 0, 'auto controls default collapsed')
-  assert.match(panel.querySelector('.dqw-auto-master').textContent, /自动用卡 · 已启用/)
-  panel.querySelector('.dqw-auto-master input').click()
-  await turn()
-  assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 2)
-  const autoGrid = panel.querySelector('.dqw-auto-grid')
-  assert.ok(autoGrid, 'both auto rows live in one shared grid so the · column lines up')
-  assert.deepEqual([...autoGrid.querySelectorAll('.dqw-auto-label')].map((el) => el.textContent), ['自动用卡（5 小时）', '自动用卡（每周）'], 'first cell stays the bare window label, left-aligned')
-  assert.deepEqual([...autoGrid.querySelectorAll('.dqw-auto-dot')].map((el) => el.textContent), ['·', '·'], 'the · separator is its own centered cell')
-  assert.deepEqual([...autoGrid.querySelectorAll('.dqw-auto-used')].map((el) => el.textContent), ['已用 99.9% 触发', '已用 99.9% 触发'], 'third cell is the used note')
-  assert.equal(window.localStorage.getItem('dsh-quota-watch:auto-open'), '1')
-  assert.equal(requests.filter((call) => call.method === 'POST').length, 0, 'disclosure never arms either window')
+  assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 0, 'legacy autoReset state renders nothing')
+  assert.equal(panel.querySelector('.dqw-auto-master'), null)
+  assert.equal(panel.querySelectorAll('input[type="checkbox"]').length, 0, 'no authorization switches anywhere')
+  assert.doesNotMatch(panel.textContent, /自动用卡/)
+  assert.equal(requests.filter((call) => call.method === 'POST').length, 0, 'rendering never writes any endpoint')
   dispose()
-  const remount = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
-  await turn()
-  const restoredPanel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  restoredPanel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  await turn()
-  assert.equal(restoredPanel.querySelectorAll('.dqw-auto-row').length, 2, 'disclosure expansion survives remount')
-  remount()
   window.close()
 })
 
@@ -1700,15 +1711,14 @@ test('international GLM detail omits domestic reset section and never lists card
   window.close()
 })
 
-test('empty wallet collapses behind its divider while auto controls remain reachable and force-refresh reveals cards', async () => {
+test('empty wallet collapses behind its divider and force-refresh reveals cards', async () => {
   const window = dom({ locale: 'zh-CN' })
   let wallet = { status: 'ready', cards: { fiveHour: [], week: [] } }
   const requests = []
   const fetchImpl = async (path, init = {}) => {
     requests.push({ path: String(path), method: init.method ?? 'GET' })
     if (String(path).endsWith('/reset-cards')) return response({ ok: true, cards: wallet.cards })
-    return response({ ...snapshot([glmProvider({ providerId: 'zai-coding-cn' })]), reset: wallet,
-      autoReset: { fiveHour: { enabled: false, threshold: 99.9 }, week: { enabled: false, threshold: 99.9 } } })
+    return response({ ...snapshot([glmProvider({ providerId: 'zai-coding-cn' })]), reset: wallet })
   }
   const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
   try {
@@ -1718,17 +1728,12 @@ test('empty wallet collapses behind its divider while auto controls remain reach
     await turn()
     panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
     await turn()
+    await turn()
     assert.equal(panel.querySelector('.dqw-reset-collapsed .dqw-reset-title').textContent, '额度重置卡 · 无可用')
     assert.equal(panel.querySelector('.dqw-reset-lines'), null)
     assert.ok(panel.querySelector('.dqw-reset'), 'collapsed block keeps the dashed divider')
     assert.equal(requests.some(({ path }) => path.endsWith('/reset-cards')), false, 'empty host summary avoids a duplicate lazy list')
-    panel.querySelector('.dqw-auto-master input').click()
-    await turn()
-    assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 2, 'pre-arming stays reachable despite zero cards')
-    assert.equal(requests.some(({ path }) => path.endsWith('/reset-cards')), false, 'expanding cached wallet does not re-list upstream')
-    panel.querySelector('.dqw-auto-master input').click()
-    await turn()
-    assert.ok(panel.querySelector('.dqw-reset-collapsed'), 'closing disclosure restores the single line')
+    assert.equal(panel.querySelector('.dqw-auto-master'), null, 'no auto controls remain on the empty state')
 
     wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 8, expireTime: '2026-11-01 09:00:00' }], week: [] } }
     panel.querySelector('[data-action="panel-refresh"]').click()

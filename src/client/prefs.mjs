@@ -3,7 +3,7 @@
 
 export const FLOAT_POSITION_KEY = 'dsh-quota-watch:float-position'
 export const SURFACE_FLAGS_KEY = 'dsh-quota-watch:surface-flags'
-export const AUTO_OPEN_KEY = 'dsh-quota-watch:auto-open'
+// NOTE: the retired 'dsh-quota-watch:auto-open' key is deliberately NOT reused.
 
 export const MARGIN = 8
 
@@ -101,22 +101,5 @@ export function saveSurfaceFlags(storage, flags) {
     storage.setItem(SURFACE_FLAGS_KEY, JSON.stringify({ cardHidden: Boolean(flags?.cardHidden) }))
   } catch {
     /* storage unavailable; flags stay session-only */
-  }
-}
-
-/** The auto-use rows stay collapsed by default; a checked header toggle expands them. */
-export function loadAutoOpen(storage) {
-  try {
-    return storage.getItem(AUTO_OPEN_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-export function saveAutoOpen(storage, open) {
-  try {
-    storage.setItem(AUTO_OPEN_KEY, open === true ? '1' : '0')
-  } catch {
-    /* storage unavailable; expansion stays session-only */
   }
 }

@@ -1,11 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import * as prefs from '../src/client/prefs.mjs'
 import {
   FLOAT_POSITION_KEY,
   SURFACE_FLAGS_KEY,
-  AUTO_OPEN_KEY,
-  loadAutoOpen,
-  saveAutoOpen,
   clampPoint,
   loadFloatPosition,
   saveFloatPosition,
@@ -47,16 +45,17 @@ test('surface flags default to card hidden (capsule-first) and survive corruptio
   assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: false })
 })
 
-test('auto-use disclosure defaults closed, persists only visibility and tolerates storage errors', () => {
-  const storage = storageStub()
-  assert.equal(loadAutoOpen(storage), false)
-  saveAutoOpen(storage, true)
-  assert.equal(storage.getItem(AUTO_OPEN_KEY), '1')
-  assert.equal(loadAutoOpen(storage), true)
-  saveAutoOpen(storage, false)
-  assert.equal(loadAutoOpen(storage), false)
-  assert.equal(loadAutoOpen({ getItem() { throw new Error('blocked') } }), false)
-  assert.doesNotThrow(() => saveAutoOpen({ setItem() { throw new Error('blocked') } }, true))
+test('the auto-open preference is retired and the old localStorage key is never reused', () => {
+  assert.equal(prefs.AUTO_OPEN_KEY, undefined, 'AUTO_OPEN_KEY is gone from the module surface')
+  assert.equal(prefs.loadAutoOpen, undefined)
+  assert.equal(prefs.saveAutoOpen, undefined)
+  // A stale value under the retired key must never leak into a surviving pref.
+  const storage = storageStub({ 'dsh-quota-watch:auto-open': '1' })
+  assert.deepEqual(loadSurfaceFlags(storage), { cardHidden: true })
+  assert.equal(loadFloatPosition(storage), null)
+  // The surviving preferences stay available.
+  assert.equal(typeof prefs.loadFloatPosition, 'function')
+  assert.equal(typeof prefs.saveSurfaceFlags, 'function')
 })
 
 // --- float-position API (0.1.12 free-positioning) ---

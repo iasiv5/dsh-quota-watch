@@ -1,6 +1,6 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES, PROVIDER_IDS } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
-import { MARGIN, clampPoint, loadAutoOpen, loadFloatPosition, loadSurfaceFlags, saveAutoOpen, saveFloatPosition, saveSurfaceFlags, titlebarTopInset } from './client/prefs.mjs'
+import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags, titlebarTopInset } from './client/prefs.mjs'
 import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
@@ -9,9 +9,6 @@ export const inject = []
 const CARD_SELECTOR = '[data-dsh-quota-watch-card]'
 const FLOAT_SELECTOR = '[data-dsh-quota-watch-float]'
 const FETCH_TIMEOUT_MS = 15_000
-// Mirrors the host's AUTO_RESET_DEFAULT_THRESHOLD. Used only when the host has not
-// reported a threshold yet, so the checkbox row can still render a meaningful label.
-const AUTO_RESET_THRESHOLD_FALLBACK = 99.9
 // Measured-size fallback for environments where getBoundingClientRect reports
 // zeros (jsdom) or the capsule has not painted yet.
 const FALLBACK_SIZE = { width: 38, height: 26 }
@@ -67,8 +64,6 @@ const COPY = {
       count: '{count} 张',
       none: '无可用',
       use: '重置',
-      autoToggle: '自动用卡',
-      autoActive: '自动用卡 · 已启用',
       expiry: '{date} 前有效',
       confirmTitle: '确认使用重置卡？',
       confirmWeek: '将消耗 1 张每周重置卡，立即重置每周额度与 5 小时额度。',
@@ -80,16 +75,6 @@ const COPY = {
       succeeded: '已重置',
       failed: '重置失败',
       loadFailed: '读取重置卡失败',
-      // Auto rows render as three grid cells — window label, a centered ·
-      // separator, and the used note — so the · column lines up across rows.
-      autoFiveHour: '自动用卡（5 小时）',
-      autoWeek: '自动用卡（每周）',
-      autoUsed: '已用 {threshold}% 触发',
-      autoImmediate: '当前已用 {used}，已超阈值：开启后会立即消耗一张卡',
-      autoSaveFailed: '开关未能保存，请重试',
-      autoPersistFailed: '开关已生效，但未能写入磁盘（重启后会丢失）',
-      autoLastOk: '上次自动重置：{window} · {time}',
-      autoLastFail: '上次自动重置失败：{message}',
     },
   },
   en: {
@@ -139,8 +124,6 @@ const COPY = {
       count: '{count}',
       none: 'none',
       use: 'Reset',
-      autoToggle: 'Auto-use',
-      autoActive: 'Auto-use · on',
       expiry: 'expires {date}',
       confirmTitle: 'Use a reset card?',
       confirmWeek: 'This spends 1 weekly reset card and immediately resets both the weekly and 5-hour quotas.',
@@ -152,15 +135,6 @@ const COPY = {
       succeeded: 'Reset done',
       failed: 'Reset failed',
       loadFailed: 'Could not read reset cards',
-      // Same three-cell grid as zh: label · used note.
-      autoFiveHour: 'Auto-use (5h)',
-      autoWeek: 'Auto-use (weekly)',
-      autoUsed: 'trigger at {threshold}% used',
-      autoImmediate: 'Currently {used} used — already past the threshold: turning this on spends a card immediately',
-      autoSaveFailed: 'Could not save the switch — retry',
-      autoPersistFailed: 'Switch applied, but it could not be written to disk (lost on restart)',
-      autoLastOk: 'Last auto-reset: {window} · {time}',
-      autoLastFail: 'Last auto-reset failed: {message}',
     },
   },
 }
@@ -280,8 +254,6 @@ const FLOAT_STYLE_TEXT = `
 .dqw-reset { border-top: 1px dashed var(--dsw-alias-border-secondary, rgba(128,128,128,.25)); padding-top: 6px; display: flex; flex-direction: column; gap: 4px; }
 .dqw-reset-head, .dqw-reset-collapsed { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 10px; line-height: 14px; }
 .dqw-reset-title { opacity: .65; }
-.dqw-auto-master { display: flex; align-items: center; gap: 4px; cursor: pointer; font-size: 10px; line-height: 14px; }
-.dqw-auto-master .dqw-auto-box { accent-color: var(--dsw-alias-button-primary-fill, #5b8def); }
 .dqw-reset-lines { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr) max-content max-content; column-gap: 6px; row-gap: 4px; align-items: center; font-size: 10.5px; line-height: 17px; font-variant-numeric: tabular-nums; }
 .dqw-reset-row { display: contents; }
 .dqw-reset-kind { white-space: nowrap; opacity: .65; }
@@ -306,23 +278,6 @@ const FLOAT_STYLE_TEXT = `
 .dqw-reset-notice { font-size: 10px; line-height: 14px; }
 .dqw-reset-notice.is-ok { color: var(--dsw-alias-label-success, #3fb950); }
 .dqw-reset-notice.is-error { color: var(--dsw-alias-label-danger, #c93c3c); }
-.dqw-reset-auto { font-size: 10px; line-height: 14px; opacity: .6; }
-/* Auto-use switches: a real checkbox per window, backed by a host-side file so
-   automatic spending keeps working while no browser is open. Both rows share one
-   grid (same recipe as .dqw-reset-lines): the window label stays left-aligned,
-   the · sits in its own narrow centered column so the two rows line up, and the
-   used note follows after the column gap. display:contents keeps the <label>
-   wrapping its checkbox for click-to-toggle while the cells join the grid. */
-.dqw-auto-grid { display: grid; grid-template-columns: max-content max-content 12px minmax(0, 1fr); column-gap: 6px; row-gap: 2px; align-items: center; font-size: 10.5px; line-height: 16px; }
-.dqw-auto { display: contents; }
-.dqw-auto-row { display: contents; }
-.dqw-auto-grid label > :is(input, span) { cursor: pointer; }
-.dqw-auto-box { width: 12px; height: 12px; margin: 0; flex: none; cursor: pointer; accent-color: var(--dsw-alias-button-primary-fill, #5b8def); }
-.dqw-auto-box:disabled { cursor: default; }
-.dqw-auto-label { opacity: .75; white-space: nowrap; }
-.dqw-auto-dot { justify-self: center; opacity: .75; }
-.dqw-auto-used { opacity: .75; min-width: 0; }
-.dqw-auto-hint { grid-column: 1 / -1; font-size: 10px; line-height: 14px; padding-left: 18px; color: var(--dsw-alias-label-warning, #d29922); }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
 `
 
@@ -833,9 +788,6 @@ export function mountQuotaCard({
   let resetPending        // reset type awaiting confirmation, or undefined
   let resetBusy           // reset type currently being spent, or undefined
   let resetNotice         // { kind: 'ok' | 'error', message }
-  let autoSaving = false  // an auto-reset switch write is in flight
-  let autoSaveError       // last switch-write failure, shown in the panel
-  let autoOpen = loadAutoOpen(win.localStorage)  // the header master toggle reveals the auto-use rows
   // Cold until the first successful render: a mount whose first poll fails or
   // stalls must behave like the documented no-data state (hidden shell, fast
   // retries), not like a warm client showing an empty capsule.
@@ -1082,76 +1034,6 @@ export function mountQuotaCard({
     return row
   }
 
-  /**
-   * Write one window's automatic-card-use switch to the host.
-   * The whole config is sent because the host normalizes a complete object; a
-   * partial patch would silently drop the other window's threshold.
-   */
-  async function saveAutoReset(configKey, enabled) {
-    if (autoSaving || disposed) return
-    const current = snapshot?.autoReset
-    const next = {
-      fiveHour: {
-        enabled: current?.fiveHour?.enabled === true,
-        threshold: current?.fiveHour?.threshold ?? AUTO_RESET_THRESHOLD_FALLBACK,
-      },
-      week: {
-        enabled: current?.week?.enabled === true,
-        threshold: current?.week?.threshold ?? AUTO_RESET_THRESHOLD_FALLBACK,
-      },
-    }
-    next[configKey].enabled = enabled === true
-    autoSaving = true
-    autoSaveError = undefined
-    if (openKey === 'glm') syncPop()
-    try {
-      const payload = await fetchResetEnvelope(fetchImpl, CLIENT_ROUTES.autoReset, next)
-      if (payload.ok !== true) autoSaveError = payload.message ?? copy.resetCards.autoSaveFailed
-      else if (payload.autoReset?.persistError !== undefined) autoSaveError = copy.resetCards.autoPersistFailed
-    } catch {
-      autoSaveError = copy.resetCards.autoSaveFailed
-    } finally {
-      autoSaving = false
-    }
-    // Pull the authoritative state back from the host rather than trusting the
-    // local guess: the host may have clamped a threshold or refused the write.
-    if (!disposed) await poll()
-    if (!disposed && openKey === 'glm') syncPop()
-  }
-
-  /** One auto-reset switch row, with a warning when enabling would fire at once. */
-  function renderAutoResetRow(windowKey, configKey, entry, auto) {
-    const wrap = doc.createElement('div')
-    wrap.className = 'dqw-auto'
-    const row = doc.createElement('label')
-    row.className = 'dqw-auto-row'
-    const box = doc.createElement('input')
-    box.type = 'checkbox'
-    box.className = 'dqw-auto-box'
-    box.checked = entry?.enabled === true
-    box.disabled = autoSaving === true
-    box.addEventListener('change', () => { void saveAutoReset(configKey, box.checked) })
-    const threshold = typeof entry?.threshold === 'number' ? entry.threshold : AUTO_RESET_THRESHOLD_FALLBACK
-    // Structured cells — window label (left), · (centered column, aligned across
-    // rows), used note — joined by the shared .dqw-auto-grid column gap.
-    const cards = copy.resetCards
-    row.append(box,
-      text(doc, 'span', 'dqw-auto-label', windowKey === '5h' ? cards.autoFiveHour : cards.autoWeek),
-      text(doc, 'span', 'dqw-auto-dot', '·'),
-      text(doc, 'span', 'dqw-auto-used', cards.autoUsed.replace('{threshold}', formatNumber(threshold, locale))))
-    wrap.append(row)
-
-    // Usage is already past the threshold: turning this on spends a card at the
-    // very next poll, which the user should know before ticking the box.
-    const provider = (snapshot?.providers ?? []).find((item) => item?.key === 'glm')
-    const used = (provider?.plan?.windows ?? []).find((window) => window?.key === windowKey)?.percent
-    if (entry?.enabled !== true && typeof used === 'number' && used >= threshold) {
-      wrap.append(text(doc, 'div', 'dqw-auto-hint',
-        copy.resetCards.autoImmediate.replace('{used}', formatPercent(used, locale))))
-    }
-    return wrap
-  }
-
   /** Only an authoritative successful list can mean "no cards". Errors retain
    * the last good inventory, preventing a transient upstream failure from hiding
    * controls or claiming that a still-available card is gone. */
@@ -1162,55 +1044,25 @@ export function mountQuotaCard({
   }
 
   function resetCollapsed() {
-    if (!resetCardsKnownEmpty() || autoOpen || resetPending !== undefined
-      || resetBusy !== undefined || resetNotice !== undefined || autoSaveError !== undefined) return false
-    const auto = snapshot?.autoReset
-    if (auto?.fiveHour?.enabled === true || auto?.week?.enabled === true
-      || auto?.persistError !== undefined || auto?.lastEvent !== undefined) return false
+    if (!resetCardsKnownEmpty() || resetPending !== undefined
+      || resetBusy !== undefined || resetNotice !== undefined) return false
     return true
-  }
-
-  /** This checkbox only reveals the real per-window switches; keep it reachable
-   * on the single-line empty state so an account without cards can still pre-arm. */
-  function buildAutoMaster(auto) {
-    if (auto === undefined || typeof auto !== 'object') return undefined
-    const master = doc.createElement('label')
-    master.className = 'dqw-auto-master'
-    const masterBox = doc.createElement('input')
-    masterBox.type = 'checkbox'
-    masterBox.className = 'dqw-auto-box'
-    masterBox.checked = autoOpen === true
-    masterBox.disabled = autoSaving === true
-    masterBox.addEventListener('change', () => {
-      autoOpen = masterBox.checked
-      saveAutoOpen(win.localStorage, autoOpen)
-      syncPop()
-    })
-    // An unchecked disclosure must never imply the host's auto-use switch is off.
-    const anyEnabled = auto.fiveHour?.enabled === true || auto.week?.enabled === true
-    master.append(text(doc, 'span', 'dqw-reset-title',
-      anyEnabled ? copy.resetCards.autoActive : copy.resetCards.autoToggle), masterBox)
-    return master
   }
 
   /** The reset block: counts, per-type reset buttons, inline confirm and last result. */
   function renderResetSection() {
     const section = doc.createElement('div')
     section.className = 'dqw-reset'
-    const autoHeader = snapshot?.autoReset
-    const master = buildAutoMaster(autoHeader)
     if (resetCollapsed()) {
       const row = doc.createElement('div')
       row.className = 'dqw-reset-collapsed'
       row.append(text(doc, 'span', 'dqw-reset-title', `${copy.resetCards.section} · ${copy.resetCards.none}`))
-      if (master !== undefined) row.append(master)
       section.append(row)
       return section
     }
     const head = doc.createElement('div')
     head.className = 'dqw-reset-head'
     head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
-    if (master !== undefined) head.append(master)
     section.append(head)
 
     const cards = knownResetCards
@@ -1230,36 +1082,6 @@ export function mountQuotaCard({
     rows.className = 'dqw-reset-lines'
     rows.append(renderResetRow('FIVE_HOUR', fiveHour), renderResetRow('WEEK', week))
     section.append(rows)
-
-    // Auto-reset switches. These are real controls backed by a host-side settings
-    // file, not browser state: automatic spending has to keep working while no
-    // browser is open, which is exactly when it matters.
-    const auto = snapshot?.autoReset
-    if (auto !== undefined && typeof auto === 'object') {
-      // The two auto-use rows stay collapsed behind the header toggle; the event
-      // notices below still render while collapsed so auto activity stays visible.
-      // One shared grid is what keeps the · column aligned across both rows.
-      if (autoOpen === true) {
-        const grid = doc.createElement('div')
-        grid.className = 'dqw-auto-grid'
-        grid.append(renderAutoResetRow('5h', 'fiveHour', auto.fiveHour, auto),
-          renderAutoResetRow('week', 'week', auto.week, auto))
-        section.append(grid)
-      }
-      const last = auto.lastEvent
-      if (last?.kind === 'auto') {
-        section.append(text(doc, 'div', 'dqw-reset-notice is-ok',
-          copy.resetCards.autoLastOk
-            .replace('{window}', last.window ?? '')
-            .replace('{time}', formatTime(new Date(last.at).toISOString(), locale) ?? '')))
-      } else if (last?.kind === 'auto-failed') {
-        section.append(text(doc, 'div', 'dqw-reset-notice is-error',
-          copy.resetCards.autoLastFail.replace('{message}', last.message ?? '')))
-      }
-      if (auto.persistError !== undefined) {
-        section.append(text(doc, 'div', 'dqw-reset-notice is-error', copy.resetCards.autoPersistFailed))
-      }
-    }
 
     if (resetPending !== undefined) {
       const box = doc.createElement('div')
