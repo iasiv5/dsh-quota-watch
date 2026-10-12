@@ -46,6 +46,7 @@ const COPY = {
     windowUsed: '已用',
     todayTokens: '今日 Tokens',
     todayCalls: '调用次数',
+    todayModelsUnavailable: '今日分模型数据暂不可用',
     weekUnlimited: '每周额度',
     unlimited: '♾️',
     unlimitedNote: '（ 无限 ）',
@@ -115,6 +116,7 @@ const COPY = {
     windowUsed: 'used',
     todayTokens: 'Today tokens',
     todayCalls: 'Calls',
+    todayModelsUnavailable: 'Per-model data unavailable today',
     weekUnlimited: 'Weekly quota',
     unlimited: '♾️',
     unlimitedNote: '( unlimited )',
@@ -453,6 +455,20 @@ function kvRow(doc, label, value) {
   return row
 }
 
+/**
+ * One degradation decision for today's usage numbers, shared by the summary
+ * row and the detail: ready shows real values, a short stale episode keeps the
+ * last-good values, and a first error or a host-stamped `staleTooLong` hides
+ * both big numbers and the per-model breakdown. The five-minute judgement
+ * itself lives in the host (`usage.staleTooLong`) — the client never reads a
+ * local clock for this.
+ */
+function displayableGlmUsage(usage) {
+  if (usage?.status === 'ready') return usage
+  if (usage?.status === 'stale' && usage?.staleTooLong !== true) return usage
+  return undefined
+}
+
 /** GLM summary row view model: fixed 5h-window percent plus today's compact tokens. */
 function glmRowModel(provider) {
   if (provider?.status === 'missing') return null
@@ -460,9 +476,7 @@ function glmRowModel(provider) {
   const windows = provider?.plan?.windows
   if (!Array.isArray(windows) || windows.length === 0) return null
   const five = windows.find((window) => window?.key === '5h')
-  const tokens = provider?.usage?.status === 'ready' || provider?.usage?.status === 'stale'
-    ? provider?.usage?.totalTokens
-    : undefined
+  const tokens = displayableGlmUsage(provider?.usage)?.totalTokens
   return {
     kind: 'data',
     label: 'GLM',
@@ -1286,19 +1300,19 @@ export function mountQuotaCard({
       detail.append(text(doc, 'p', 'dqw-error', `${bannerPrefix}${provider.error ? `: ${provider.error}` : ''}`))
     }
     if (key === 'glm') {
-      const usage = provider?.usage
+      const usage = displayableGlmUsage(provider?.usage)
       const numbers = doc.createElement('div')
       numbers.className = 'dqw-bignums'
       const tokensBig = doc.createElement('div')
       tokensBig.className = 'dqw-big'
       tokensBig.append(
-        text(doc, 'div', 'dqw-big-value', formatCompact(usage?.totalTokens, locale)),
+        text(doc, 'div', 'dqw-big-value', usage !== undefined ? formatCompact(usage.totalTokens, locale) : '—'),
         text(doc, 'div', 'dqw-big-label', copy.todayTokens),
       )
       const callsBig = doc.createElement('div')
       callsBig.className = 'dqw-big'
       callsBig.append(
-        text(doc, 'div', 'dqw-big-value', formatNumber(usage?.totalCalls, locale)),
+        text(doc, 'div', 'dqw-big-value', usage !== undefined ? formatNumber(usage.totalCalls, locale) : '—'),
         text(doc, 'div', 'dqw-big-label', copy.todayCalls),
       )
       numbers.append(tokensBig, callsBig)
@@ -1344,7 +1358,11 @@ export function mountQuotaCard({
         wins.append(text(doc, 'span', 'dqw-kv-sub', reset ? `${copy.noteOpen}${copy.reset}: ${reset}${copy.noteClose}` : ''))
       }
       detail.append(wins)
-      if (Array.isArray(usage?.models) && usage.models.length > 0) {
+      if (usage === undefined) {
+        // The five-minute window rolled over or the first probe failed: the
+        // whole per-model breakdown degrades together with the big numbers.
+        detail.append(text(doc, 'p', 'dqw-muted', copy.todayModelsUnavailable))
+      } else if (Array.isArray(usage.models) && usage.models.length > 0) {
         const models = doc.createElement('div')
         models.className = 'dqw-models'
         for (const model of usage.models) {

@@ -1199,6 +1199,98 @@ test('GLM detail renders big numbers, all windows, models and the updated time',
   window.close()
 })
 
+// --- Task 8: one degradation decision for today's usage ----------------------
+
+async function openGlmDetail(window) {
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  container.shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  return window.document
+    .querySelector('[data-dsh-quota-watch-float]')
+    .shadowRoot
+    .querySelector('[data-dsh-quota-watch-panel-detail="glm"]')
+}
+
+test('GLM detail keeps the fixed normal order: today numbers, windows, per-model rows', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider()]))
+  const detail = await openGlmDetail(window)
+  const order = [...detail.children]
+    .map((el) => el.className)
+    .filter((name) => name !== '' && name !== 'dqw-panel-header')
+  assert.deepEqual(order, ['dqw-bignums', 'dqw-wins', 'dqw-models'])
+  dispose()
+  window.close()
+})
+
+test('a short stale episode keeps the last-good today values everywhere', async () => {
+  const window = dom()
+  const provider = glmProvider()
+  provider.usage = { ...provider.usage, status: 'stale', error: 'HTTP 500', errorKind: 'server' }
+  const { dispose } = await mounted(window, snapshot([provider]))
+  const detail = await openGlmDetail(window)
+  assert.match(detail.textContent, /8\.3M/)
+  assert.match(detail.textContent, /152/)
+  assert.ok(detail.querySelector('.dqw-model-row'), 'per-model rows survive a short stale episode')
+  assert.doesNotMatch(detail.textContent, /Per-model data unavailable today/)
+  const row = window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
+  assert.match(row.textContent, /8\.3M/, 'the summary appendix follows the same rule')
+  dispose()
+  window.close()
+})
+
+test('staleTooLong and first errors degrade both big numbers and the model rows together', async () => {
+  for (const usage of [
+    { ...glmProvider().usage, status: 'stale', staleTooLong: true, error: 'HTTP 500', errorKind: 'server' },
+    { status: 'error', error: 'HTTP 500', errorKind: 'server' },
+  ]) {
+    const window = dom()
+    const provider = glmProvider()
+    provider.usage = usage
+    const { dispose } = await mounted(window, snapshot([provider]))
+    const detail = await openGlmDetail(window)
+    const bigs = [...detail.querySelectorAll('.dqw-big-value')].map((el) => el.textContent)
+    assert.deepEqual(bigs, ['—', '—'], String(usage.status))
+    assert.equal(detail.querySelector('.dqw-model-row'), null, String(usage.status))
+    assert.match(detail.textContent, /Per-model data unavailable today/, String(usage.status))
+    const row = window.document.querySelector('[data-dsh-quota-watch-card]').shadowRoot.querySelector('[data-dsh-quota-watch-row="glm"]')
+    assert.doesNotMatch(row.textContent, /8\.3M/, `summary appendix degrades too: ${usage.status}`)
+    dispose()
+    window.close()
+  }
+})
+
+test('the degraded model note speaks Chinese under a zh locale', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const provider = glmProvider()
+  provider.usage = { status: 'error', error: 'HTTP 500', errorKind: 'server' }
+  const { dispose } = await mounted(window, snapshot([provider]))
+  const detail = await openGlmDetail(window)
+  assert.match(detail.textContent, /今日分模型数据暂不可用/)
+  dispose()
+  window.close()
+})
+
+test('a ready usage snapshot restores the real values after a degraded episode', async () => {
+  const window = dom()
+  const provider = glmProvider()
+  provider.usage = { ...provider.usage, status: 'stale', staleTooLong: true, error: 'HTTP 500', errorKind: 'server' }
+  const { dispose } = await mounted(window, snapshot([provider]))
+  let detail = await openGlmDetail(window)
+  assert.deepEqual([...detail.querySelectorAll('.dqw-big-value')].map((el) => el.textContent), ['—', '—'])
+  dispose()
+  window.close()
+
+  const recovered = dom()
+  const { dispose: dispose2 } = await mounted(recovered, snapshot([glmProvider()]))
+  detail = await openGlmDetail(recovered)
+  assert.match(detail.textContent, /8\.3M/)
+  assert.match(detail.textContent, /152/)
+  assert.ok(detail.querySelector('.dqw-model-row'))
+  dispose2()
+  recovered.close()
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()
