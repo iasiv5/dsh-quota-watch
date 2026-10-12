@@ -281,6 +281,16 @@ const FLOAT_STYLE_TEXT = `
 .dqw-reset-notice.is-ok { color: var(--dsw-alias-label-success, #3fb950); }
 .dqw-reset-notice.is-error { color: var(--dsw-alias-label-danger, #c93c3c); }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
+/* Narrow widths (~280px containers and the ≤480px bottom sheet): card rows
+   wrap so kind, expiry and button never truncate horizontally; the expiry may
+   grow onto its own line. The five-column alignment grid above stays for wide
+   floating panels. */
+@media (max-width: 480px) {
+  .dqw-reset-lines { display: flex; flex-direction: column; gap: 4px; }
+  .dqw-reset-row { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 6px; row-gap: 2px; }
+  .dqw-reset-expiry { flex: 1 1 100%; white-space: normal; overflow: visible; text-overflow: clip; }
+  .dqw-reset-use { margin-left: auto; }
+}
 `
 
 /** Locale resolution follows the host, not just the browser: the DSH locale

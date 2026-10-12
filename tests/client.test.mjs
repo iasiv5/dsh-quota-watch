@@ -1533,6 +1533,35 @@ test('after a manual spend the wallet comes from the overview snapshot, not a se
   } finally { dispose(); window.close() }
 })
 
+// --- Task 11: card rows wrap on narrow screens --------------------------------
+
+test('reset rows wrap on narrow widths and keep the spend button focusable', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+  const { dispose } = await mounted(window, resetSnapshot(wallet))
+  await openPanelGlm(window)
+
+  const styleText = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('style').textContent
+  // The wide five-column alignment grid stays for floating panels...
+  assert.match(styleText, /\.dqw-reset-lines \{ display: grid;/)
+  // ...and a narrow-width block lets rows wrap instead of truncating.
+  const mediaIndex = styleText.indexOf('@media (max-width: 480px)')
+  assert.ok(mediaIndex >= 0, 'a narrow-width media block exists')
+  const rowWrapIndex = styleText.indexOf('.dqw-reset-row { display: flex; flex-wrap: wrap;', mediaIndex)
+  assert.ok(rowWrapIndex > mediaIndex, 'card rows wrap inside the narrow-width block')
+  const expiryIndex = styleText.indexOf('white-space: normal', rowWrapIndex)
+  assert.ok(expiryIndex > rowWrapIndex, 'expiry text grows to a second line instead of truncating')
+
+  // Structure: the spend control is a real, enabled <button> — focusable by
+  // construction; jsdom pixel geometry is not trusted here.
+  const button = floatPanel(window).querySelector('.dqw-reset-use')
+  assert.equal(button.type, 'button')
+  assert.equal(button.textContent, '重置')
+  assert.equal(button.disabled, false)
+  dispose()
+  window.close()
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()
