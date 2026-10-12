@@ -20,6 +20,7 @@ import {
   windowKeyForResetType,
 } from './core/reset.mjs'
 import { retireLegacyAutoResetSettings } from './core/legacy-auto-settings.mjs'
+import { createManualOutcomeJournal } from './core/manual-outcome.mjs'
 import {
   DEFAULT_POLL_INTERVAL_SEC,
   MAX_POLL_INTERVAL_SEC,
@@ -144,6 +145,14 @@ export function resolveAutoResetSettingsPath(env = process.env) {
   return join(home, 'glm-quota-reset', 'settings.json')
 }
 
+/** Where the single-entry manual-outcome journal lives (no credentials inside). */
+export function resolveManualOutcomePath(env = process.env) {
+  const home = typeof env?.DSH_HOME === 'string' && env.DSH_HOME.trim() !== ''
+    ? env.DSH_HOME.trim()
+    : join(homedir(), '.dsh')
+  return join(home, 'glm-quota-reset', 'manual-outcome.json')
+}
+
 /**
  * Read the saved auto-reset switches.
  * Only a genuinely missing file falls back to the profile config. An unreadable
@@ -181,6 +190,10 @@ export function createQuotaService(ctx, options = {}) {
   // retirement below; the poll itself is read-only. Tests must inject an
   // isolated path so the retirement can never write the real $DSH_HOME.
   const settingsPath = options.legacyAutoSettingsPath ?? resolveAutoResetSettingsPath()
+  const manualOutcomePath = options.manualOutcomePath ?? resolveManualOutcomePath()
+  // Single-entry write-ahead journal for one manual card attempt; every state
+  // transition is durable before anyone is told anything.
+  const manualJournal = createManualOutcomeJournal(manualOutcomePath)
   // A saved switch wins over the profile config: the panel is the user-facing
   // control, and the profile value is only the initial default.
   const savedAutoReset = readAutoResetSettings(settingsPath)
@@ -263,6 +276,7 @@ export function createQuotaService(ctx, options = {}) {
     return {
       ...(updatedAt !== undefined ? { updatedAt } : {}),
       ...(resetState !== undefined ? { reset: resetView() } : {}),
+      ...manualOutcomeView(),
       autoReset: autoResetView(),
       providers: ['glm', 'copilot'].map((key) => {
         const provider = providers.get(key)
@@ -608,12 +622,58 @@ export function createQuotaService(ctx, options = {}) {
   }
 
   /**
+   * The browser-safe manual-outcome projection: any unresolved record — in-flight
+   * included, which the browser can only treat as unknown — shows up as a minimal
+   * receipt, and unreadable storage disables manual spending. Never credentials.
+   */
+  function manualOutcomeView() {
+    try {
+      const record = manualJournal.read()
+      if (record === null) return {}
+      return {
+        manualOutcome: {
+          attemptId: record.attemptId,
+          resetType: record.resetType,
+          startedAt: record.startedAt,
+          status: record.status === 'in-flight' ? 'unknown' : record.status,
+        },
+      }
+    } catch {
+      return { manualOutcomeError: 'storage-unavailable' }
+    }
+  }
+
+  /** A new manual consumption may not start while any outcome record is unresolved or unreadable. */
+  function manualConsumptionGuard() {
+    try {
+      const record = manualJournal.read()
+      if (record === null) return undefined
+      return {
+        ok: false,
+        error: 'manual-outcome-unresolved',
+        message: '上一次手动用卡结果未核实，请先在面板确认后再试',
+        attemptId: record.attemptId,
+        manualOutcome: {
+          attemptId: record.attemptId,
+          resetType: record.resetType,
+          startedAt: record.startedAt,
+          status: record.status === 'in-flight' ? 'unknown' : record.status,
+        },
+      }
+    } catch {
+      return { ok: false, error: 'storage-unavailable', message: '手动用卡暂不可用：结果记录无法读取' }
+    }
+  }
+
+  /**
    * Spend one reset card. The caller must have shown the user which card will be
    * used; this function re-lists first so the choice is made against live state,
    * then re-probes the quota so the panel reflects the reset immediately.
    */
   async function useResetCard(args = {}, autoWindowKey) {
     if (resetSpendInFlight) return { ok: false, error: 'busy', message: '重置操作进行中，请稍后重试' }
+    const guard = manualConsumptionGuard()
+    if (guard !== undefined) return guard
     resetSpendInFlight = true
     try {
       // A spend re-lists against live state; wait for any cosmetic background
@@ -688,28 +748,81 @@ export function createQuotaService(ctx, options = {}) {
     })
     if (spec === undefined) return { ok: false, error: 'invalid-spec', message: '重置请求参数无效' }
 
-    // A timed-out/non-JSON/non-200 POST can have consumed a card upstream. Do not
-    // silently retry it at the next backoff boundary without a fresh user decision.
-    const unknownOutcome = () => {
-      const windowKey = windowKeyForResetType(type)
-      if (windowKey !== undefined) autoResetArmed[windowKey] = false
-      const additionallyCleared = resetWindow(type)?.alsoClears
-      if (additionallyCleared !== undefined) autoResetArmed[additionallyCleared] = false
-      return { ok: false, error: 'request-unknown', message: '重置结果未知；请先核实卡数与额度，再决定是否重试' }
+    // Write-ahead: durably record the attempt BEFORE the irreversible POST.
+    // A failed or refused journal write means no POST is sent at all.
+    let attempt
+    try {
+      attempt = manualJournal.begin({ resetType: type })
+    } catch {
+      return { ok: false, error: 'storage-unavailable', message: '手动用卡暂不可用：未能持久记录本次尝试，已阻止消费' }
     }
-    let outcome
+
+    // Only HTTP 200 with an explicit boolean `success` is a known result.
+    // Timeouts, non-200 answers, unparseable bodies and unclear flags stay
+    // unknown: the card may or may not have been consumed upstream.
+    let knownOutcome
+    let message
     try {
       const { status, body } = await postJson(spec)
-      if (status !== 200 || typeof body?.success !== 'boolean') return unknownOutcome()
-      outcome = parseResetUseResult(status, body)
+      if (status === 200 && typeof body?.success === 'boolean') {
+        const parsed = parseResetUseResult(status, body)
+        knownOutcome = parsed.ok ? 'success' : 'refused'
+        message = parsed.message
+      } else {
+        message = '重置结果未知；请先核实卡数与额度，再决定是否重试'
+      }
     } catch {
-      return unknownOutcome()
+      message = '重置结果未知；请先核实卡数与额度，再决定是否重试'
     }
-    if (!outcome.ok) {
+
+    // Persist the durable outcome BEFORE answering the browser: a known result
+    // becomes a receipt that survives a lost host→browser response, an unclear
+    // one becomes unknown. A failed write keeps the on-disk in-flight record,
+    // which stays locked and presents as unknown.
+    let stored
+    try {
+      stored = knownOutcome === undefined
+        ? manualJournal.markUnknown(attempt.attemptId)
+        : manualJournal.finishKnown(attempt.attemptId, knownOutcome)
+    } catch { stored = undefined }
+
+    const outcomeProjection = (status) => ({
+      attemptId: attempt.attemptId,
+      resetType: attempt.resetType,
+      startedAt: attempt.startedAt,
+      status: status === 'in-flight' ? 'unknown' : status,
+    })
+
+    if (stored === undefined) {
+      // The outcome could not be durably recorded: never present this as a
+      // certain result, and keep the wallet locked via the surviving record.
+      return {
+        ok: false,
+        error: 'request-unknown',
+        message: '重置结果未知；请先核实卡数与额度，再决定是否重试',
+        attemptId: attempt.attemptId,
+      }
+    }
+    if (knownOutcome === undefined) {
+      return {
+        ok: false,
+        error: 'request-unknown',
+        message,
+        attemptId: attempt.attemptId,
+        manualOutcome: outcomeProjection(stored.status),
+      }
+    }
+    if (knownOutcome === 'refused') {
       // A refusal can mean the card was consumed by another client; re-list so the
       // panel stops offering a card that no longer exists.
       await listResetCards()
-      return { ok: false, error: 'rejected', message: outcome.message }
+      return {
+        ok: false,
+        error: 'rejected',
+        message,
+        attemptId: attempt.attemptId,
+        manualOutcome: outcomeProjection(stored.status),
+      }
     }
 
     // Disarm immediately after a confirmed spend, BEFORE follow-up network calls.
@@ -732,10 +845,12 @@ export function createQuotaService(ctx, options = {}) {
     ;(options.logMirror ?? console).info?.(spendLine)
     return {
       ok: true,
-      message: outcome.message,
+      message,
       resetType: type,
       ...(cleared !== undefined ? { window: cleared.window } : {}),
       recordId: card.recordId,
+      attemptId: attempt.attemptId,
+      manualOutcome: outcomeProjection(stored.status),
       ...(after.ok ? { cards: after.cards } : {}),
       quota: view().providers.find((provider) => provider.key === 'glm'),
     }
