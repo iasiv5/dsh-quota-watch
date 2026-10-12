@@ -68,6 +68,14 @@ const COPY = {
       use: '重置',
       expiry: '{date} 前有效',
       expiryAssumed: '无时区字段按北京时间解读，非上游官方说明',
+      unconfirmed: '结果未确认，请核对服务商官方卡数和额度',
+      outcomeUnknownTitle: '上次手动用卡结果未确认',
+      outcomeUnknownBody: '可能已消耗一张重置卡，且不会自动重试。请先核对服务商官方卡数与额度，再标记「我已核实」。',
+      verifyButton: '我已核实',
+      knownSuccessTitle: '上次手动用卡：已确认成功',
+      knownRefusedTitle: '上次手动用卡：上游明确拒绝',
+      acknowledgeButton: '我已了解结果',
+      storageUnavailable: '手动用卡暂不可用（结果记录无法读取）',
       confirmTitle: '确认使用重置卡？',
       confirmWeek: '将消耗 1 张每周重置卡，立即重置每周额度与 5 小时额度。',
       confirmFiveHour: '将消耗 1 张 5 小时重置卡，立即重置 5 小时额度。',
@@ -130,6 +138,14 @@ const COPY = {
       use: 'Reset',
       expiry: 'expires {date}',
       expiryAssumed: 'No-zone stamps are read as Beijing time — not an official upstream statement',
+      unconfirmed: 'Outcome unconfirmed — check the official card count and quota',
+      outcomeUnknownTitle: 'Last manual reset outcome unconfirmed',
+      outcomeUnknownBody: 'A card may have been spent and nothing retries automatically. Check the official card count and quota first, then confirm below.',
+      verifyButton: 'I verified it',
+      knownSuccessTitle: 'Last manual reset: confirmed success',
+      knownRefusedTitle: 'Last manual reset: refused upstream',
+      acknowledgeButton: 'I acknowledge',
+      storageUnavailable: 'Manual card use unavailable (outcome journal unreadable)',
       confirmTitle: 'Use a reset card?',
       confirmWeek: 'This spends 1 weekly reset card and immediately resets both the weekly and 5-hour quotas.',
       confirmFiveHour: 'This spends 1 5-hour reset card and immediately resets the 5-hour quota.',
@@ -284,6 +300,8 @@ const FLOAT_STYLE_TEXT = `
 .dqw-reset-notice.is-ok { color: var(--dsw-alias-label-success, #3fb950); }
 .dqw-reset-notice.is-error { color: var(--dsw-alias-label-danger, #c93c3c); }
 .dqw-error { margin: 0; font-size: 10px; line-height: 14px; color: var(--dsw-alias-label-warning, #b46900); }
+/* A pending manual outcome turns the capsule into the always-visible warning entry. */
+.dqw-capsule[data-outcome='true'] { box-shadow: 0 0 0 2px var(--dsw-alias-label-warning, #d29922); }
 /* Narrow widths (~280px containers and the ≤480px bottom sheet): card rows
    wrap so kind, expiry and button never truncate horizontally; the expiry may
    grow onto its own line. The five-column alignment grid above stays for wide
@@ -805,7 +823,8 @@ export function mountQuotaCard({
   // the host's ten-minute background list or a force refresh.
   let resetPending        // reset type awaiting confirmation, or undefined
   let resetBusy           // reset type currently being spent, or undefined
-  let resetNotice         // { kind: 'ok' | 'error', message }
+  let resetNotice         // { kind: 'ok' | 'error' | 'unknown', message, attemptId?, known? }
+  let outcomeBusy = false // an acknowledge/receipt request is in flight
   // Force/ordinary refresh watermark. An ordinary GET may only apply when it
   // started while NO force was in flight AND under the current force
   // generation — so a force result can neither be dropped by a later-started
@@ -965,6 +984,9 @@ export function mountQuotaCard({
       }
       panel.append(list)
     }
+    // The pending manual outcome is readable on the overview even when every
+    // provider row is missing — this is the always-reachable warning surface.
+    appendOutcomeBlock(panel)
     panel.append(overviewActions())
   }
 
@@ -972,7 +994,9 @@ export function mountQuotaCard({
    * Spend one card.
    * The confirmation is cleared first so a double click cannot fire twice, and the
    * button stays disabled for the whole round trip — the host may already have spent
-   * the card even if this request later fails.
+   * the card even if this request later fails. A KNOWN answer is shown and then
+   * auto-confirmed via the receipt route; an ambiguous one is NEVER presented as a
+   * failure — the persistent snapshot warning takes over instead.
    */
   async function spendResetCard(resetType) {
     if (resetBusy !== undefined || disposed) return
@@ -980,22 +1004,95 @@ export function mountQuotaCard({
     resetPending = undefined
     resetNotice = undefined
     if (openKey === 'glm') syncPop()
+    let outcome
     try {
-      const payload = await fetchResetEnvelope(fetchImpl, CLIENT_ROUTES.resetUse, { resetType })
-      if (payload.ok === true) {
-        resetNotice = { kind: 'ok', message: copy.resetCards.succeeded }
-      } else {
-        resetNotice = { kind: 'error', message: payload.message ?? copy.resetCards.failed }
-      }
+      outcome = await fetchResetEnvelope(fetchImpl, CLIENT_ROUTES.resetUse, { resetType })
     } catch {
-      resetNotice = { kind: 'error', message: copy.resetCards.failed }
+      // Transport-level loss: the POST may or may not have consumed a card.
+      outcome = { ok: false, error: 'request-unknown' }
     } finally {
       resetBusy = undefined
     }
-    // The host already re-listed and re-probed inside the spend: the fresh
-    // wallet arrives via the overview snapshot — never a second card-list GET.
-    if (!disposed) void poll()
+    if (outcome.ok === true) {
+      resetNotice = { kind: 'ok', message: copy.resetCards.succeeded, attemptId: outcome.attemptId, known: true }
+    } else if (outcome.error === 'rejected') {
+      resetNotice = { kind: 'error', message: outcome.message ?? copy.resetCards.failed, attemptId: outcome.attemptId, known: true }
+    } else if (outcome.error === 'request-unknown') {
+      resetNotice = { kind: 'unknown', message: copy.resetCards.unconfirmed }
+    } else if (outcome.error === 'storage-unavailable') {
+      resetNotice = { kind: 'error', message: copy.resetCards.storageUnavailable }
+    } else {
+      resetNotice = { kind: 'error', message: outcome.message ?? copy.resetCards.failed }
+    }
+    // The authoritative wallet + outcome record arrive via the overview snapshot.
+    if (!disposed) await poll()
     if (!disposed && openKey === 'glm') syncPop()
+    // A known outcome was displayed: confirm delivery so the host receipt can
+    // clear. A failed confirmation keeps the persistent receipt and the lock.
+    if (!disposed && resetNotice?.known === true && typeof resetNotice.attemptId === 'string') {
+      await acknowledgeOutcome(CLIENT_ROUTES.resetReceipt, resetNotice.attemptId)
+    }
+  }
+
+  /**
+   * Confirm delivery of a known receipt, or submit a user-verified unknown.
+   * A failure keeps the host record and the spend lock; the snapshot stays the
+   * single authority for what the user still has to acknowledge.
+   */
+  async function acknowledgeOutcome(route, attemptId) {
+    if (outcomeBusy || disposed || typeof attemptId !== 'string' || attemptId === '') return
+    outcomeBusy = true
+    if (openKey === 'glm') syncPop()
+    try {
+      await fetchResetEnvelope(fetchImpl, route, { attemptId })
+    } catch { /* kept locked; the snapshot still carries the outcome */ }
+    outcomeBusy = false
+    if (!disposed) await poll()
+    if (!disposed && openKey === 'glm') syncPop()
+  }
+
+  /**
+   * The persistent manual-outcome block: unknown → bilingual warning + verify
+   * button; known → the real outcome + acknowledge button; unreadable storage
+   * → manual use unavailable with no action. Rendered in the card section AND
+   * the overview, and it keeps the capsule alive even with zero providers.
+   */
+  function renderManualOutcomeBlock() {
+    const block = doc.createElement('div')
+    block.dataset.dshQuotaWatchOutcome = ''
+    if (snapshot?.manualOutcomeError === 'storage-unavailable') {
+      block.className = 'dqw-reset-notice is-error'
+      block.textContent = copy.resetCards.storageUnavailable
+      return block
+    }
+    const outcome = snapshot?.manualOutcome
+    if (outcome === undefined) return null
+    const button = doc.createElement('button')
+    button.type = 'button'
+    button.className = 'dqw-reset-btn'
+    button.disabled = outcomeBusy
+    if (outcome.status === 'unknown') {
+      block.className = 'dqw-reset-confirm'
+      block.append(
+        text(doc, 'div', 'dqw-reset-confirm-title', copy.resetCards.outcomeUnknownTitle),
+        text(doc, 'div', 'dqw-reset-confirm-body', copy.resetCards.outcomeUnknownBody),
+      )
+      button.textContent = copy.resetCards.verifyButton
+      button.addEventListener('click', () => { void acknowledgeOutcome(CLIENT_ROUTES.resetAcknowledge, outcome.attemptId) })
+    } else {
+      const knownSuccess = outcome.status === 'known-success'
+      block.className = knownSuccess ? 'dqw-reset-notice is-ok' : 'dqw-reset-notice is-error'
+      block.append(text(doc, 'div', '', knownSuccess ? copy.resetCards.knownSuccessTitle : copy.resetCards.knownRefusedTitle))
+      button.textContent = copy.resetCards.acknowledgeButton
+      button.addEventListener('click', () => { void acknowledgeOutcome(CLIENT_ROUTES.resetReceipt, outcome.attemptId) })
+    }
+    block.append(button)
+    return block
+  }
+
+  const appendOutcomeBlock = (container) => {
+    const block = renderManualOutcomeBlock()
+    if (block !== null) container.append(block)
   }
 
   /** Render aligned columns: card name · earliest expiry | count | action. */
@@ -1065,6 +1162,7 @@ export function mountQuotaCard({
       head.className = 'dqw-reset-head'
       head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
       section.append(head, text(doc, 'p', 'dqw-muted', copy.resetCards.querying))
+      appendOutcomeBlock(section)
       return section
     }
     if (reset.status === 'error') {
@@ -1073,6 +1171,7 @@ export function mountQuotaCard({
       head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
       const reason = reset.error ? `: ${reset.error}` : ''
       section.append(head, text(doc, 'p', 'dqw-muted', `${copy.failed}${reason}`))
+      appendOutcomeBlock(section)
       return section
     }
     const cards = reset.cards
@@ -1084,6 +1183,7 @@ export function mountQuotaCard({
       row.className = 'dqw-reset-collapsed'
       row.append(text(doc, 'span', 'dqw-reset-title', `${copy.resetCards.section} · ${copy.resetCards.none}`))
       section.append(row)
+      appendOutcomeBlock(section)
       return section
     }
     const head = doc.createElement('div')
@@ -1130,6 +1230,7 @@ export function mountQuotaCard({
     if (resetNotice !== undefined) {
       section.append(text(doc, 'div', `dqw-reset-notice is-${resetNotice.kind}`, resetNotice.message))
     }
+    appendOutcomeBlock(section)
     return section
   }
 
@@ -1334,7 +1435,11 @@ export function mountQuotaCard({
     const providers = snapshot?.providers ?? []
     const glm = glmRowModel(providers.find((provider) => provider?.key === 'glm'))
     const copilot = copilotRowModel(providers.find((provider) => provider?.key === 'copilot'))
-    dataHidden = glm === null && copilot === null
+    // A pending manual outcome keeps the capsule alive as the focusable warning
+    // entry even when every provider row is gone; it hides again only once the
+    // outcome is cleared AND nothing else has data to show.
+    const pendingOutcome = snapshot?.manualOutcome !== undefined || snapshot?.manualOutcomeError !== undefined
+    dataHidden = glm === null && copilot === null && !pendingOutcome
     if (dataHidden && openKey !== undefined) {
       openKey = undefined
       syncPop()
@@ -1359,11 +1464,14 @@ export function mountQuotaCard({
     const alert = [glm, copilot].some((model) => model !== null && typeof model.percent === 'number' && model.percent > 95)
     if (alert) surface.setAttribute('data-alert', 'true')
     else surface.removeAttribute('data-alert')
+    if (pendingOutcome) surface.setAttribute('data-outcome', 'true')
+    else surface.removeAttribute('data-outcome')
     const summary = [glm, copilot]
       .filter(Boolean)
       .map((model) => `${model.label} ${formatPercent(model.percent, locale)}`)
       .join(' · ')
-    const label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
+    let label = summary === '' ? copy.title : locale === 'zh' ? `${copy.title}：${summary}` : `${copy.title}: ${summary}`
+    if (pendingOutcome) label = `${label} · ${copy.resetCards.outcomeUnknownTitle}`
     surface.setAttribute('aria-label', label)
     surface.title = label
     applyPosition()

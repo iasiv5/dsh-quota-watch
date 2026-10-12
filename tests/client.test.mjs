@@ -1689,6 +1689,199 @@ test('double-confirming fires exactly one spend POST and the result still lands'
   } finally { dispose(); window.close() }
 })
 
+// --- Task 14: outcome presentation and delivery confirmation ------------------
+
+function outcomeHarness(t, { providers = 'domestic', use = { ok: true, attemptId: 'att-x' }, receipt = 'ok', acknowledge = 'ok', overviewExtra, pollIntervalMs = 60_000 } = {}) {
+  const window = dom({ locale: 'zh-CN' })
+  const state = { providers, spent: false, cleared: false, recovered: false, receiptCalls: [], ackCalls: [], useCalls: 0 }
+  const providerList = () => {
+    if (state.providers === 'domestic') return [glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]
+    return [
+      { key: 'glm', displayName: 'GLM Coding Plan', status: 'missing', credential: 'none' },
+      { key: 'copilot', displayName: 'GitHub Copilot', status: 'missing', credential: 'none' },
+    ]
+  }
+  const payloadFor = () => {
+    const wallet = state.spent
+      ? { status: 'ready', cards: { fiveHour: [], week: [] } }
+      : { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+    const extra = typeof overviewExtra === 'function' ? overviewExtra(state) : (overviewExtra ?? {})
+    return { ...snapshot(providerList()), reset: wallet, ...extra }
+  }
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    const target = String(path)
+    requests.push({ path: target, method: init?.method ?? 'GET', body: init?.body })
+    if (target.endsWith('/reset-cards/use')) {
+      state.useCalls += 1
+      if (use === 'transport-lost') throw new Error('connection lost')
+      return response(use)
+    }
+    if (target.endsWith('/reset-cards/receipt')) {
+      state.receiptCalls.push(String(init?.body ?? ''))
+      if (typeof receipt === 'function') return receipt(state) === 'ok' ? response({ ok: true }) : response({ ok: false }, 503)
+      return receipt === 'fail' ? response({ ok: false }, 503) : response({ ok: true })
+    }
+    if (target.endsWith('/reset-cards/acknowledge')) {
+      state.ackCalls.push(String(init?.body ?? ''))
+      const verdict = typeof acknowledge === 'function' ? acknowledge(state) : acknowledge
+      return verdict === 'ok' ? response({ ok: true }) : response({ ok: false, error: 'verify-failed', message: '核实失败' }, 502)
+    }
+    return response(payloadFor())
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs })
+  t.after(() => { dispose(); window.close() })
+  return { window, state, requests }
+}
+
+async function confirmSpend(window) {
+  await openConfirmBox(window)
+  floatPanel(window).querySelector('.dqw-reset-btn.is-primary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  for (let hop = 0; hop < 5; hop += 1) await turn()
+}
+
+const outcomeBlock = (window) => floatPanel(window).querySelector('[data-dsh-quota-watch-outcome]')
+const capsuleSurface = (window) => window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
+
+test('a known success answer shows the result and auto-confirms delivery once', async (t) => {
+  const h = outcomeHarness(t, { use: { ok: true, message: '操作成功', attemptId: 'att-1' }, receipt: 'ok' })
+  await turn()
+  await confirmSpend(h.window)
+  assert.match(glmDetailText(h.window), /已重置/)
+  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
+  assert.equal(receiptPosts.length, 1, 'exactly one delivery confirmation')
+  assert.match(receiptPosts[0].body ?? '', /att-1/, 'the receipt carries the same attemptId')
+  assert.equal(h.state.useCalls, 1, 'no retry behind the user\'s back')
+})
+
+test('a known refusal shows the upstream message and confirms delivery too', async (t) => {
+  const h = outcomeHarness(t, { use: { ok: false, error: 'rejected', message: '指定的重置次数不可用', attemptId: 'att-2' }, receipt: 'ok' })
+  await turn()
+  await confirmSpend(h.window)
+  assert.match(glmDetailText(h.window), /不可用/, 'the definite refusal is shown verbatim')
+  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
+  assert.equal(receiptPosts.length, 1)
+  assert.match(receiptPosts[0].body ?? '', /att-2/)
+})
+
+test('a lost use answer never claims failure; the snapshot receipt persists until acknowledged', async (t) => {
+  const h = outcomeHarness(t, {
+    use: 'transport-lost',
+    receipt: 'ok',
+    overviewExtra: (state) => (state.useCalls > 0 && state.receiptCalls.length === 0
+      ? { manualOutcome: { attemptId: 'att-3', resetType: 'WEEK', startedAt: 1, status: 'known-success' } }
+      : {}),
+  })
+  await turn()
+  await confirmSpend(h.window)
+  assert.match(glmDetailText(h.window), /结果未确认/, 'an ambiguous transport loss is never a "failure"')
+  assert.equal(h.state.useCalls, 1, 'no blind retry')
+
+  const block = outcomeBlock(h.window)
+  assert.ok(block, 'the persistent receipt block renders from the snapshot alone')
+  assert.match(block.textContent, /已确认成功/)
+  block.querySelector('button').dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  for (let hop = 0; hop < 6; hop += 1) await turn()
+  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
+  assert.equal(receiptPosts.length, 1)
+  assert.match(receiptPosts[0].body ?? '', /att-3/)
+  assert.equal(outcomeBlock(h.window), null, 'the acknowledged receipt clears from the snapshot')
+})
+
+test('an unknown outcome warns bilingually, keeps the capsule alive with zero credentials, and clears only after a verified recheck', async (t) => {
+  const h = outcomeHarness(t, {
+    providers: 'missing',
+    acknowledge: (state) => (state.recovered ? 'ok' : 'fail'),
+    overviewExtra: (state) => (state.cleared ? {} : { manualOutcome: { attemptId: 'att-4', resetType: 'FIVE_HOUR', startedAt: 1, status: 'unknown' } }),
+    pollIntervalMs: 5,
+  })
+  await turn()
+  // All providers missing, yet the capsule stays alive as the focusable warning entry.
+  const surface = capsuleSurface(h.window)
+  assert.equal(surface.hidden, false)
+  assert.equal(surface.tabIndex, 0)
+  assert.match(surface.getAttribute('aria-label') ?? '', /未确认/)
+  assert.equal(surface.getAttribute('data-outcome'), 'true')
+
+  // The overview reads: warning + verify button (no provider row is expandable).
+  capsuleSurface(h.window).dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  const block = outcomeBlock(h.window)
+  assert.ok(block, 'the overview shows the pending outcome block')
+  assert.match(block.textContent, /可能已消耗/)
+  assert.match(block.textContent, /我已核实/)
+
+  // A failed recheck keeps the lock.
+  block.querySelector('button').dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  for (let hop = 0; hop < 6; hop += 1) await turn()
+  assert.equal(h.state.ackCalls.length, 1)
+  assert.match(h.requests.filter((row) => row.path.endsWith('/acknowledge'))[0].body ?? '', /att-4/)
+  assert.ok(outcomeBlock(h.window), 'a failed recheck never unlocks')
+
+  // Domestic credentials recover and the fresh recheck succeeds.
+  h.state.providers = 'domestic'
+  h.state.recovered = true
+  h.state.cleared = true // with the ack succeeding, the host record is gone
+  outcomeBlock(h.window).querySelector('button').dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  for (let hop = 0; hop < 8; hop += 1) await turn()
+  assert.equal(h.state.ackCalls.length, 2)
+  assert.equal(outcomeBlock(h.window), null, 'the verified unknown clears')
+
+  // Cleared AND everything missing again → the capsule may hide again.
+  h.state.providers = 'missing'
+  floatPanel(h.window).querySelector('[data-dsh-quota-watch-panel-header] [data-action="panel-refresh"]')
+    ?? capsuleSurface(h.window)
+  capsuleSurface(h.window).dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  capsuleSurface(h.window).dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(capsuleSurface(h.window).hidden, true, 'with nothing pending and nothing to show, the capsule hides again')
+})
+
+test('the unknown warning also reads in English', async (t) => {
+  const window = dom({ locale: 'en-US' })
+  const payload = {
+    ...snapshot([
+      { key: 'glm', displayName: 'GLM Coding Plan', status: 'missing', credential: 'none' },
+      { key: 'copilot', displayName: 'GitHub Copilot', status: 'missing', credential: 'none' },
+    ]),
+    manualOutcome: { attemptId: 'att-en', resetType: 'WEEK', startedAt: 1, status: 'unknown' },
+  }
+  const { dispose } = await mounted(window, payload)
+  await turn()
+  // Open the capsule panel: the overview is the warning surface when no
+  // provider row exists.
+  capsuleSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  const text = floatPanel(window).textContent
+  assert.match(text, /may have been spent/i)
+  assert.match(text, /I verified it/)
+  dispose(); window.close()
+})
+
+test('an unreadable outcome journal shows manual use as unavailable and offers no button', async (t) => {
+  const window = dom({ locale: 'zh-CN' })
+  const payload = {
+    ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
+    reset: { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } },
+    manualOutcomeError: 'storage-unavailable',
+  }
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    requests.push({ path: String(path), method: init?.method ?? 'GET' })
+    return response(payload)
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    await openPanelGlm(window)
+    assert.match(glmDetailText(window), /手动用卡暂不可用/)
+    const button = floatPanel(window).querySelector('[data-dsh-quota-watch-outcome] button')
+    assert.equal(button, null, 'a broken journal offers no acknowledge/verify action')
+    assert.equal(requests.some((row) => row.path.endsWith('/reset-cards/use')), false)
+  } finally { dispose(); window.close() }
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()
