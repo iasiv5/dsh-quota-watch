@@ -1941,7 +1941,12 @@ test('a confirmed success notice clears after about five seconds; refusals persi
   const h = outcomeHarness(t, { use: { ok: true, message: '操作成功', attemptId: 'att-5' }, receipt: 'ok', outcomeNoticeMs: 30 })
   await turn()
   await confirmSpend(h.window)
-  assert.match(glmDetailText(h.window), /已重置/)
+  let visible = false
+  for (let hop = 0; hop < 100 && !visible; hop += 1) {
+    visible = /已重置/.test(glmDetailText(h.window))
+    if (!visible) await turn()
+  }
+  assert.ok(visible, 'the success notice is shown after the spend')
   let cleared = false
   for (let hop = 0; hop < 200 && !cleared; hop += 1) {
     await turn()

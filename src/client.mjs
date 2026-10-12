@@ -1048,13 +1048,17 @@ export function mountQuotaCard({
     // Refusals and the persistent outcome warning stay until the user acts.
     if (!disposed && resetNotice?.kind === 'ok') {
       const notice = resetNotice
-      outcomeNoticeTimer = win.setTimeout(() => {
-        outcomeNoticeTimer = undefined
+      // Clear any previous handle first and let the callback retire only its
+      // own id, so overlapping spends never leak a live timer past dispose.
+      if (outcomeNoticeTimer !== undefined) win.clearTimeout(outcomeNoticeTimer)
+      const timerId = win.setTimeout(() => {
+        if (outcomeNoticeTimer === timerId) outcomeNoticeTimer = undefined
         if (!disposed && resetNotice === notice) {
           resetNotice = undefined
           if (openKey === 'glm') syncPop()
         }
       }, Math.max(0, outcomeNoticeMs))
+      outcomeNoticeTimer = timerId
     }
   }
 
