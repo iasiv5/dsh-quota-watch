@@ -59,6 +59,7 @@ const COPY = {
     },
     resetCards: {
       section: '额度重置卡',
+      querying: '查询中',
       week: '每周重置卡',
       fiveHour: '5 小时重置卡',
       count: '{count} 张',
@@ -119,6 +120,7 @@ const COPY = {
     },
     resetCards: {
       section: 'Quota reset cards',
+      querying: 'Checking',
       week: 'Weekly reset card',
       fiveHour: '5-hour reset card',
       count: '{count}',
@@ -772,22 +774,28 @@ export function mountQuotaCard({
     return disposeDrag
   }
   let snapshot
-  let requestSequence = 0
+  let normalSequence = 0
   let timer
   let noDataRetries = 0
   let disposed = false
   let queuedPlace = false
   let openKey
   let panelNav = false
-  // The host now refreshes the wallet on a slow independent clock; the detail
-  // still fetches on first open. Keep the last authoritative list through a
-  // transient list failure so the section never vanishes or invents zero cards.
-  let knownResetCards
-  let resetInfo           // last on-demand listResetCards payload (or an error)
-  let resetLoading = false
+  // The wallet lives ONLY in the host snapshot (`snapshot.reset`): the detail
+  // never issues its own card-list GET, so a stale second source cannot fight
+  // the host's ten-minute background list or a force refresh.
   let resetPending        // reset type awaiting confirmation, or undefined
   let resetBusy           // reset type currently being spent, or undefined
   let resetNotice         // { kind: 'ok' | 'error', message }
+  // Force/ordinary refresh watermark. An ordinary GET may only apply when it
+  // started while NO force was in flight AND under the current force
+  // generation — so a force result can neither be dropped by a later-started
+  // GET that returned first, nor rolled back by a GET that started during the
+  // force and returned late. Only a GET started after the force completed may
+  // update the UI.
+  let forceBusy = false
+  let forceGeneration = 0
+  let forcedResetForOpen = false   // the one-shot poll(true) guard per detail open
   // Cold until the first successful render: a mount whose first poll fails or
   // stalls must behave like the documented no-data state (hidden shell, fast
   // retries), not like a warm client showing an empty capsule.
@@ -941,24 +949,6 @@ export function mountQuotaCard({
     panel.append(overviewActions())
   }
 
-  /** Fetch a live card list for the detail or after spending, independently of
-   * the host's ten-minute background snapshot and its force-refresh route. */
-  async function loadResetCards() {
-    if (resetLoading || disposed) return
-    resetLoading = true
-    if (openKey === 'glm') syncPop()
-    try {
-      const payload = await fetchResetEnvelope(fetchImpl, CLIENT_ROUTES.resetCards)
-      resetInfo = payload
-      if (payload.ok === true && payload.cards !== undefined) knownResetCards = payload.cards
-    } catch {
-      resetInfo = { ok: false, error: 'request-failed' }
-    } finally {
-      resetLoading = false
-    }
-    if (!disposed && openKey === 'glm') syncPop()
-  }
-
   /**
    * Spend one card.
    * The confirmation is cleared first so a double click cannot fire twice, and the
@@ -975,10 +965,6 @@ export function mountQuotaCard({
       const payload = await fetchResetEnvelope(fetchImpl, CLIENT_ROUTES.resetUse, { resetType })
       if (payload.ok === true) {
         resetNotice = { kind: 'ok', message: copy.resetCards.succeeded }
-        // The host returns the post-reset card list; fall back to a re-list when it
-        // could not refresh, so the panel never offers a card that is already gone.
-        resetInfo = payload.cards !== undefined ? { ok: true, cards: payload.cards } : resetInfo
-        if (payload.cards !== undefined) knownResetCards = payload.cards
       } else {
         resetNotice = { kind: 'error', message: payload.message ?? copy.resetCards.failed }
       }
@@ -987,10 +973,10 @@ export function mountQuotaCard({
     } finally {
       resetBusy = undefined
     }
-    await loadResetCards()
-    // The host already re-probed the quota; pulling the overview repaints the
-    // window grid with the post-reset percentages.
+    // The host already re-listed and re-probed inside the spend: the fresh
+    // wallet arrives via the overview snapshot — never a second card-list GET.
     if (!disposed) void poll()
+    if (!disposed && openKey === 'glm') syncPop()
   }
 
   /** Render aligned columns: card name · earliest expiry | count | action. */
@@ -1034,26 +1020,36 @@ export function mountQuotaCard({
     return row
   }
 
-  /** Only an authoritative successful list can mean "no cards". Errors retain
-   * the last good inventory, preventing a transient upstream failure from hiding
-   * controls or claiming that a still-available card is gone. */
-  function resetCardsKnownEmpty() {
-    if (knownResetCards === undefined) return false
-    return Array.isArray(knownResetCards.fiveHour) && Array.isArray(knownResetCards.week)
-      && knownResetCards.fiveHour.length === 0 && knownResetCards.week.length === 0
-  }
-
-  function resetCollapsed() {
-    if (!resetCardsKnownEmpty() || resetPending !== undefined
-      || resetBusy !== undefined || resetNotice !== undefined) return false
-    return true
-  }
-
-  /** The reset block: counts, per-type reset buttons, inline confirm and last result. */
+  /**
+   * The domestic reset section: a fixed dashed divider + title driving four
+   * states purely from the latest host snapshot — no wallet snapshot yet
+   * (查询中), ready-empty (无可用), error (查询失败, no buttons) and
+   * ready-available (non-zero types only). There is no second data source.
+   */
   function renderResetSection() {
     const section = doc.createElement('div')
     section.className = 'dqw-reset'
-    if (resetCollapsed()) {
+    const reset = snapshot?.reset
+    if (reset === undefined || reset.status === 'loading') {
+      const head = doc.createElement('div')
+      head.className = 'dqw-reset-head'
+      head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
+      section.append(head, text(doc, 'p', 'dqw-muted', copy.resetCards.querying))
+      return section
+    }
+    if (reset.status === 'error') {
+      const head = doc.createElement('div')
+      head.className = 'dqw-reset-head'
+      head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
+      const reason = reset.error ? `: ${reset.error}` : ''
+      section.append(head, text(doc, 'p', 'dqw-muted', `${copy.failed}${reason}`))
+      return section
+    }
+    const cards = reset.cards
+    const week = Array.isArray(cards?.week) ? cards.week : []
+    const fiveHour = Array.isArray(cards?.fiveHour) ? cards.fiveHour : []
+    if (week.length === 0 && fiveHour.length === 0 && resetPending === undefined
+      && resetBusy === undefined && resetNotice === undefined) {
       const row = doc.createElement('div')
       row.className = 'dqw-reset-collapsed'
       row.append(text(doc, 'span', 'dqw-reset-title', `${copy.resetCards.section} · ${copy.resetCards.none}`))
@@ -1065,23 +1061,13 @@ export function mountQuotaCard({
     head.append(text(doc, 'span', 'dqw-reset-title', copy.resetCards.section))
     section.append(head)
 
-    const cards = knownResetCards
-    if (cards === undefined) {
-      // Nothing fetched yet, a failed fetch, or no GLM credential on the host: say so
-      // instead of drawing two rows of zeroes that look like "no cards left".
-      const message = resetLoading
-        ? copy.loading
-        : resetInfo?.message ?? snapshot?.reset?.error ?? (resetInfo === undefined ? copy.loading : copy.resetCards.loadFailed)
-      section.append(text(doc, 'p', 'dqw-muted', message))
-      return section
-    }
-
-    const week = Array.isArray(cards.week) ? cards.week : []
-    const fiveHour = Array.isArray(cards.fiveHour) ? cards.fiveHour : []
     const rows = doc.createElement('div')
     rows.className = 'dqw-reset-lines'
-    rows.append(renderResetRow('FIVE_HOUR', fiveHour), renderResetRow('WEEK', week))
-    section.append(rows)
+    // Only non-zero card types render a row: a zero row would read as an
+    // actionable "0 left" line where the collapsed state already said 无可用.
+    if (fiveHour.length > 0) rows.append(renderResetRow('FIVE_HOUR', fiveHour))
+    if (week.length > 0) rows.append(renderResetRow('WEEK', week))
+    if (rows.childElementCount > 0) section.append(rows)
 
     if (resetPending !== undefined) {
       const box = doc.createElement('div')
@@ -1203,10 +1189,12 @@ export function mountQuotaCard({
       // international (z.ai) provider would only ever render a permanent failure.
       if (provider?.credential === 'configured' && provider?.providerId === PROVIDER_IDS.glmDomestic) {
         detail.append(renderResetSection())
-        // The host snapshot carries the full recent wallet. Fetch lazily only
-        // when neither it nor a prior on-demand read has a usable card list.
-        if (resetInfo === undefined && knownResetCards === undefined && !resetLoading) {
-          void loadResetCards()
+        // The wallet lives only in the host snapshot: until the first reset
+        // snapshot lands, show 查询中 and force ONE read-only refresh per open
+        // — never a separate card-list GET.
+        if (snapshot?.reset === undefined && !forcedResetForOpen) {
+          forcedResetForOpen = true
+          void poll(true)
         }
       }
       return
@@ -1422,8 +1410,6 @@ export function mountQuotaCard({
 
   const render = (next) => {
     snapshot = next
-    const cards = next?.reset?.status === 'ready' ? next.reset.cards : undefined
-    if (Array.isArray(cards?.fiveHour) && Array.isArray(cards?.week)) knownResetCards = cards
     renderAll()
   }
 
@@ -1434,19 +1420,39 @@ export function mountQuotaCard({
 
   const poll = async (force) => {
     if (disposed) return
-    const sequence = ++requestSequence
+    if (force === true) {
+      // One force at a time; its response always wins over any ordinary GET.
+      if (forceBusy) return
+      forceBusy = true
+      const generation = ++forceGeneration
+      try {
+        const next = await fetchJson(fetchImpl, CLIENT_ROUTES.refresh, 'POST')
+        if (generation === forceGeneration && !disposed) render(next)
+      } catch {
+        if (!disposed) showTransportError()
+      } finally {
+        forceBusy = false
+      }
+      return
+    }
+    const sequence = ++normalSequence
+    // Watermark captured at start: a GET that started during a force is never
+    // applied, and neither is one started under an older force generation.
+    const startedDuringForce = forceBusy
+    const genAtStart = forceGeneration
     try {
-      const next = await fetchJson(fetchImpl, force ? CLIENT_ROUTES.refresh : CLIENT_ROUTES.overview, force ? 'POST' : 'GET')
-      if (sequence === requestSequence && !disposed) render(next)
+      const next = await fetchJson(fetchImpl, CLIENT_ROUTES.overview, 'GET')
+      const applicable = !startedDuringForce && genAtStart === forceGeneration
+      if (sequence === normalSequence && applicable && !disposed) render(next)
     } catch {
-      if (sequence === requestSequence && !disposed) showTransportError()
+      if (sequence === normalSequence && !disposed) showTransportError()
     } finally {
       // Self-scheduling chain (replaces the fixed interval): every completed
       // poll — success OR transport error — arms the next one, so the no-data
       // backoff also covers a cold start whose first request fails outright.
-      // timer === undefined guards against a concurrent force poll forking a
-      // second chain; the already-armed timer keeps the cadence.
-      if (timer === undefined && sequence === requestSequence && !disposed && doc.visibilityState !== 'hidden') {
+      // The force path never arms a second chain: only the latest ordinary
+      // GET may re-arm the timer.
+      if (timer === undefined && sequence === normalSequence && !disposed && doc.visibilityState !== 'hidden') {
         timer = win.setTimeout(() => {
           timer = undefined
           if (!disposed && doc.visibilityState !== 'hidden') void poll()
@@ -1527,6 +1533,7 @@ export function mountQuotaCard({
   const toggleRow = (key) => {
     panelNav = false
     lastAnchor = anchorFromRow(key)
+    if (openKey !== key) forcedResetForOpen = false
     openKey = openKey === key ? undefined : key
     renderAll()
   }
@@ -1563,6 +1570,7 @@ export function mountQuotaCard({
     }
     const provider = event.target?.closest?.('[data-dsh-quota-watch-panel-provider]')
     if (provider) {
+      forcedResetForOpen = false
       openKey = provider.dataset.dshQuotaWatchPanelProvider
       panelNav = true
       syncPop()

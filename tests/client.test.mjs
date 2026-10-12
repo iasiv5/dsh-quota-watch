@@ -1319,6 +1319,220 @@ test('a legacy snapshot carrying autoReset renders no auto-use UI and calls no a
   window.close()
 })
 
+// --- Task 10: one snapshot drives the domestic card section ------------------
+
+function resetSnapshot(wallet) {
+  return { ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]), reset: wallet }
+}
+
+function floatPanel(window) {
+  return window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+}
+
+// The panel-detail attribute sits on the panel element itself (syncPop).
+function glmDetailText(window) {
+  return window.document
+    .querySelector('[data-dsh-quota-watch-float]')
+    .shadowRoot
+    .querySelector('[data-dsh-quota-watch-panel-detail="glm"]')
+    ?.textContent ?? ''
+}
+
+async function openPanelGlm(window) {
+  const panel = floatPanel(window)
+  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  await turn()
+  return panel
+}
+
+// glmDetailText is the hoisted function declared beside the Task 10 helpers.
+
+test('the card section renders four states purely from snapshot.reset', async () => {
+  // No wallet snapshot yet → 查询中, no buttons.
+  {
+    const window = dom({ locale: 'zh-CN' })
+    const { dispose } = await mounted(window, snapshot([glmProvider({ providerId: 'zai-coding-cn' })]))
+    await openPanelGlm(window)
+    assert.match(glmDetailText(window), /查询中/)
+    assert.equal(floatPanel(window).querySelectorAll('.dqw-reset-use').length, 0)
+    dispose(); window.close()
+  }
+  // ready non-empty → only non-zero card types render.
+  {
+    const window = dom({ locale: 'zh-CN' })
+    const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+    const { dispose } = await mounted(window, resetSnapshot(wallet))
+    await openPanelGlm(window)
+    const rows = [...floatPanel(window).querySelectorAll('.dqw-reset-row')]
+    assert.equal(rows.length, 1, 'only the non-zero card type renders a row')
+    assert.match(rows[0].textContent, /5 小时重置卡/)
+    assert.equal(floatPanel(window).querySelectorAll('.dqw-reset-use').length, 1)
+    dispose(); window.close()
+  }
+  // error → 查询失败 with the reason and no spend buttons.
+  {
+    const window = dom({ locale: 'zh-CN' })
+    const { dispose } = await mounted(window, resetSnapshot({ status: 'error', error: 'HTTP 503' }))
+    await openPanelGlm(window)
+    assert.match(glmDetailText(window), /查询失败/)
+    assert.match(glmDetailText(window), /HTTP 503/)
+    assert.equal(floatPanel(window).querySelector('.dqw-reset-row'), null)
+    assert.equal(floatPanel(window).querySelectorAll('.dqw-reset-use').length, 0, 'an error state renders no spend buttons')
+    dispose(); window.close()
+  }
+  // Same in English.
+  {
+    const window = dom({ locale: 'en-US' })
+    const { dispose } = await mounted(window, resetSnapshot({ status: 'error', error: 'HTTP 503' }))
+    await openPanelGlm(window)
+    assert.match(glmDetailText(window), /Query failed/)
+    dispose(); window.close()
+  }
+})
+
+test('the first detail open without a wallet snapshot forces one refresh and never lists separately', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    requests.push({ path: String(path), method: init?.method ?? 'GET' })
+    return response(snapshot([glmProvider({ providerId: 'zai-coding-cn' })]))
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    await openPanelGlm(window)
+    await turn(); await turn()
+    assert.match(glmDetailText(window), /查询中/)
+    assert.equal(requests.filter((row) => row.path.endsWith('/refresh')).length, 1, 'at most one forced refresh')
+    assert.equal(requests.some((row) => row.path.endsWith('/reset-cards')), false, 'no separate card-list GET')
+  } finally { dispose(); window.close() }
+})
+
+test('a force result survives an ordinary GET that started later and returned earlier', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  let releaseForce
+  const forceGate = new Promise((resolve) => { releaseForce = resolve })
+  let forceResolved = false
+  const staleWallet = { status: 'ready', cards: { fiveHour: [{ recordId: 1, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+  const freshWallet = { status: 'ready', cards: { fiveHour: [{ recordId: 9, expireTime: '2026-12-01 09:00:00' }], week: [] } }
+  const payloadFor = () => resetSnapshot(forceResolved ? freshWallet : staleWallet)
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    const target = String(path)
+    requests.push({ path: target, method: init?.method ?? 'GET' })
+    if (target.endsWith('/refresh')) {
+      await forceGate
+      forceResolved = true
+      return response(payloadFor())
+    }
+    return response(payloadFor())
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 5 })
+  try {
+    await turn(); await turn()
+    const panel = await openPanelGlm(window)
+    assert.match(glmDetailText(window), /11\/01/, 'the stale wallet renders first')
+
+    const getsBefore = requests.filter((row) => row.method === 'GET').length
+    panel.querySelector('[data-action="panel-refresh"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    for (let hop = 0; hop < 10; hop += 1) await turn()
+    const getsDuring = requests.filter((row) => row.method === 'GET').length - getsBefore
+    assert.ok(getsDuring >= 1, 'ordinary GETs keep polling while the force is in flight')
+
+    releaseForce()
+    for (let hop = 0; hop < 6; hop += 1) await turn()
+    assert.match(glmDetailText(window), /12\/01/,
+      'the force payload is applied even though a later-started GET returned first')
+    const resetText = floatPanel(window).querySelector('.dqw-reset').textContent
+    assert.doesNotMatch(resetText, /11\/01/, 'the stale card is gone from the card section')
+  } finally { dispose(); window.close() }
+})
+
+test('a GET that started during a force cannot roll back the applied force result', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  let releaseForce
+  const forceGate = new Promise((resolve) => { releaseForce = resolve })
+  let releaseGet
+  const getGate = new Promise((resolve) => { releaseGet = resolve })
+  let deferGets = false
+  let forceResolved = false
+  const staleWallet = { status: 'ready', cards: { fiveHour: [{ recordId: 1, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+  const freshWallet = { status: 'ready', cards: { fiveHour: [{ recordId: 9, expireTime: '2026-12-01 09:00:00' }], week: [] } }
+  const payloadFor = () => resetSnapshot(forceResolved ? freshWallet : staleWallet)
+  const fetchImpl = async (path, init = {}) => {
+    const target = String(path)
+    if (target.endsWith('/refresh')) {
+      await forceGate
+      forceResolved = true
+      return response(payloadFor())
+    }
+    // The GET's data is fixed at request time: a parked GET stays stale even
+    // though the world moved on while it waited.
+    const planned = response(payloadFor())
+    if (deferGets) await getGate
+    return planned
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 5 })
+  try {
+    await turn(); await turn()
+    const panel = await openPanelGlm(window)
+    assert.match(glmDetailText(window), /11\/01/)
+
+    deferGets = true
+    panel.querySelector('[data-action="panel-refresh"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    for (let hop = 0; hop < 10; hop += 1) await turn()
+    releaseForce()
+    for (let hop = 0; hop < 6; hop += 1) await turn()
+    assert.match(glmDetailText(window), /12\/01/, 'the force result applied')
+
+    releaseGet()
+    for (let hop = 0; hop < 8; hop += 1) await turn()
+    assert.match(glmDetailText(window), /12\/01/, 'the parked stale GET must not roll the force back')
+    const resetTextAfter = floatPanel(window).querySelector('.dqw-reset').textContent
+    assert.doesNotMatch(resetTextAfter, /11\/01/, 'the stale card never comes back')
+  } finally { dispose(); window.close() }
+})
+
+test('after a manual spend the wallet comes from the overview snapshot, not a second list', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  let spent = false
+  const payloadFor = () => {
+    const wallet = spent
+      ? { status: 'ready', cards: { fiveHour: [], week: [] } }
+      : { status: 'ready', cards: { fiveHour: [{ recordId: 3, expireTime: '2026-11-01 09:00:00' }], week: [] } }
+    return resetSnapshot(wallet)
+  }
+  const requests = []
+  const fetchImpl = async (path, init = {}) => {
+    const target = String(path)
+    requests.push({ path: target, method: init?.method ?? 'GET' })
+    if (target.endsWith('/reset-cards/use')) {
+      spent = true
+      return response({ ok: true, message: '操作成功', attemptId: 'synthetic-attempt' })
+    }
+    return response(payloadFor())
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    await openPanelGlm(window)
+    assert.match(glmDetailText(window), /11\/01/)
+    floatPanel(window).querySelector('.dqw-reset-use').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    floatPanel(window).querySelector('.dqw-reset-btn.is-primary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    for (let hop = 0; hop < 5; hop += 1) await turn()
+    assert.match(glmDetailText(window), /已重置/)
+    assert.equal(requests.some((row) => row.path.endsWith('/reset-cards')), false,
+      'no separate card-list GET after a spend')
+    assert.ok(requests.filter((row) => row.method === 'GET').length >= 2, 'the overview is re-read after the spend')
+    const resetTextAfterSpend = floatPanel(window).querySelector('.dqw-reset').textContent
+    assert.doesNotMatch(resetTextAfterSpend, /11\/01/, 'the spent card disappears via the overview snapshot')
+  } finally { dispose(); window.close() }
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()
@@ -1652,17 +1866,17 @@ test('panel keeps its position across row re-renders and scrolls', async () => {
 
 test('domestic reset section stays two card lines with Beijing expiry and no auto-use controls', async () => {
   const window = dom({ locale: 'zh-CN' })
-  const data = { ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
-    autoReset: { fiveHour: { enabled: false, threshold: 99.9 }, week: { enabled: true, threshold: 99.9 } } }
+  const data = {
+    ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
+    reset: { status: 'ready', cards: { fiveHour: [], week: [
+      { recordId: 2, expireTime: '2026-11-01 09:00:00' },
+      { recordId: 1, expireTime: '2026-01-02 00:30:00' },
+    ] } },
+  }
   const requests = []
   const fetchImpl = async (path, init = {}) => {
     requests.push({ path, method: init.method ?? 'GET' })
-    return response(String(path).endsWith('/reset-cards')
-      ? { ok: true, cards: { fiveHour: [], week: [
-        { recordId: 2, expireTime: '2026-11-01 09:00:00' },
-        { recordId: 1, expireTime: '2026-01-02 00:30:00' },
-      ] } }
-      : data)
+    return response(data)
   }
   const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
   await turn()
@@ -1677,12 +1891,12 @@ test('domestic reset section stays two card lines with Beijing expiry and no aut
   const floatStyle = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('style').textContent
   assert.match(floatStyle, /\.dqw-reset \{ border-top: 1px dashed/, 'expanded reset block retains its divider')
   assert.doesNotMatch(floatStyle, /\.dqw-auto/, 'the retired auto-use styles are gone')
+  // Only the non-zero card type renders a row: an empty type collapses away.
   const cardRows = [...panel.querySelectorAll('.dqw-reset-row')]
-  assert.equal(cardRows.length, 2)
-  assert.equal(cardRows[0].querySelector('.dqw-reset-kind').textContent, '5 小时重置卡')
-  assert.equal(cardRows[1].querySelector('.dqw-reset-kind').textContent, '每周重置卡')
-  assert.deepEqual(cardRows.map((row) => row.querySelector('.dqw-reset-mid').textContent), ['·', '·'])
-  assert.equal(cardRows[1].querySelector('.dqw-reset-expiry').textContent, '01/02 前有效')
+  assert.equal(cardRows.length, 1, 'only the type holding cards renders a row')
+  assert.equal(cardRows[0].querySelector('.dqw-reset-kind').textContent, '每周重置卡')
+  assert.deepEqual(cardRows.map((row) => row.querySelector('.dqw-reset-mid').textContent), ['·'])
+  assert.equal(cardRows[0].querySelector('.dqw-reset-expiry').textContent, '01/02 前有效')
   assert.ok(panel.querySelector('.dqw-reset-lines'), 'both rows share one alignment grid')
   assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1, 'empty type has no button')
   assert.equal(panel.querySelectorAll('.dqw-auto-row').length, 0, 'legacy autoReset state renders nothing')
@@ -1741,23 +1955,26 @@ test('empty wallet collapses behind its divider and force-refresh reveals cards'
     await turn()
     assert.equal(requests.filter(({ method }) => method === 'POST').length, 1, 'one 立即刷新 request updates quotas and cards')
     assert.equal(panel.querySelector('.dqw-reset-collapsed'), null)
-    assert.equal(panel.querySelectorAll('.dqw-reset-row').length, 2)
+    assert.equal(panel.querySelectorAll('.dqw-reset-row').length, 1, 'only the non-zero type renders a row')
     assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1)
 
     wallet = { status: 'error', error: 'HTTP 503' }
     panel.querySelector('[data-action="panel-refresh"]').click()
     await turn()
     await turn()
-    assert.equal(panel.querySelector('.dqw-reset-collapsed'), null, 'a failed list retains the last good wallet')
-    assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 1)
+    assert.match(panel.textContent, /查询失败/, 'a failed refresh shows the error state')
+    assert.equal(panel.querySelector('.dqw-reset-row'), null, 'an error never shows the stale spendable rows')
+    assert.equal(panel.querySelectorAll('.dqw-reset-use').length, 0, 'and no stale buttons')
   } finally { dispose(); window.close() }
 })
 
 test('English empty reset section collapses to one row and keeps its separator', async () => {
   const window = dom({ locale: 'en-US' })
-  const data = snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()])
-  const fetchImpl = async (path) => response(String(path).endsWith('/reset-cards')
-    ? { ok: true, cards: { fiveHour: [], week: [] } } : data)
+  const data = {
+    ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
+    reset: { status: 'ready', cards: { fiveHour: [], week: [] } },
+  }
+  const fetchImpl = async (path) => response(data)
   const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
   await turn()
   const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
