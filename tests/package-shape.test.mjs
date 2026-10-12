@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { parse } from 'yaml'
+import { CLIENT_ROUTES, ROUTES } from '../src/shared.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageJson = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
@@ -41,16 +42,8 @@ test('client export and quality scripts are defined', () => {
 
 test('service-constructing tests build exclusively through the isolated helper', async () => {
   const testsDir = resolve(root, 'tests')
-  // auto-reset.test.mjs is retired by a later task; manual-redemption.test.mjs
-  // is created by one — missing files simply drop out of the guarded set.
-  for (const name of ['host.test.mjs', 'auto-reset.test.mjs', 'manual-redemption.test.mjs']) {
-    let content
-    try {
-      content = await readFile(resolve(testsDir, name), 'utf8')
-    } catch (error) {
-      if (error?.code === 'ENOENT') continue
-      throw error
-    }
+  for (const name of ['host.test.mjs', 'manual-redemption.test.mjs']) {
+    const content = await readFile(resolve(testsDir, name), 'utf8')
     assert.ok(
       !content.includes('createQuotaService('),
       `${name} must construct services via createIsolatedQuotaService, never the bare factory`,
@@ -60,6 +53,45 @@ test('service-constructing tests build exclusively through the isolated helper',
   assert.ok(helper.includes('createQuotaService('), 'the helper is the only test-side importer of the bare factory')
   assert.ok(helper.includes('legacyAutoSettingsPath'), 'the helper injects the legacy settings path')
   assert.ok(helper.includes('manualOutcomePath'), 'the helper injects the manual outcome path')
+})
+
+test('runtime source has zero automatic-strategy code paths', async () => {
+  const runtimeSources = [
+    'src/host.mjs',
+    'src/shared.mjs',
+    'src/access.mjs',
+    'src/core/adapters.mjs',
+    'src/core/reset.mjs',
+    'src/core/manual-outcome.mjs',
+    'src/core/legacy-auto-settings.mjs',
+  ]
+  for (const name of runtimeSources) {
+    const content = await readFile(resolve(root, name), 'utf8')
+    assert.ok(
+      !/maybeAutoReset|evaluateAutoReset|normalizeAutoResetConfig|autoResetConfigFor|windowKeyForResetType|readAutoResetSettings|writeAutoResetSettings|updateAutoResetConfig/.test(content),
+      `${name} still contains retired automatic-strategy code`,
+    )
+    assert.ok(!content.includes('ROUTES.autoReset'), `${name} still maps the retired endpoint through the shared contract`)
+  }
+})
+
+test('the retired auto-reset endpoint survives only as a host-private 410 tombstone', async () => {
+  assert.ok(!('autoReset' in ROUTES), 'the shared route contract must not carry the retired endpoint')
+  assert.ok(!('autoReset' in CLIENT_ROUTES))
+  const shared = await readFile(resolve(root, 'src/shared.mjs'), 'utf8')
+  assert.ok(!shared.includes('autoReset'), 'src/shared.mjs mentions the retired endpoint')
+  const host = await readFile(resolve(root, 'src/host.mjs'), 'utf8')
+  assert.ok(host.includes("'/api/dsh-quota-watch/auto-reset'"), 'the private tombstone path lives in the host only')
+})
+
+test('cordis patch keeps the read-only quota-watch row without autoReset initial values', async () => {
+  const patch = parse(await readFile(resolve(root, 'cordis.patch.yml'), 'utf8'))
+  const row = patch[0].insert[0]
+  assert.equal(row.id, 'quota-watch')
+  assert.deepEqual(Object.keys(row.config), ['pollIntervalSec'])
+  assert.equal(row.config.pollIntervalSec, 60)
+  const raw = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8')
+  assert.ok(!raw.includes('autoReset'), 'no automatic-use authorization remains in the shipped profile patch')
 })
 
 test('Cordis patch and GitHub workflows parse and enforce OIDC publishing', async () => {

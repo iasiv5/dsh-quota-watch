@@ -7,19 +7,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  AUTO_RESET_DEFAULT_THRESHOLD,
-  autoResetConfigFor,
   buildResetListSpec,
   buildResetUseSpec,
-  evaluateAutoReset,
-  normalizeAutoResetConfig,
   normalizeResetType,
   parseResetCards,
   parseResetUseResult,
   pickResetCard,
   publicResetCards,
   resetWindow,
-  windowKeyForResetType,
   RESET_TYPES,
 } from '../src/core/reset.mjs'
 
@@ -55,12 +50,6 @@ test('normalizeResetType accepts the wire values and human spellings', () => {
   assert.equal(normalizeResetType('MONTH'), undefined)
   assert.equal(normalizeResetType(''), undefined)
   assert.equal(normalizeResetType(undefined), undefined)
-})
-
-test('windowKeyForResetType maps wire types onto plan window keys', () => {
-  assert.equal(windowKeyForResetType('WEEK'), 'week')
-  assert.equal(windowKeyForResetType('FIVE_HOUR'), '5h')
-  assert.equal(windowKeyForResetType('MONTH'), undefined)
 })
 
 test('resetWindow: only the weekly card also clears the 5h window', () => {
@@ -187,93 +176,4 @@ test('publicResetCards exposes only browser-safe fields', () => {
   assert.ok(!serialized.includes('30201780215984827'))
   assert.ok(!serialized.includes('organizationId'))
   assert.deepEqual(Object.keys(view.week[0]).sort(), ['expireTime', 'grantType', 'recordId'])
-})
-
-// --- auto reset -------------------------------------------------------------
-
-test('normalizeAutoResetConfig defaults both windows to disabled at 99.9%', () => {
-  const config = normalizeAutoResetConfig(undefined)
-  assert.deepEqual(config.fiveHour, { enabled: false, threshold: 99.9 })
-  assert.deepEqual(config.week, { enabled: false, threshold: 99.9 })
-  assert.deepEqual(normalizeAutoResetConfig('garbage').week.enabled, false)
-  assert.deepEqual(normalizeAutoResetConfig(42).fiveHour.enabled, false)
-})
-
-test('normalizeAutoResetConfig clamps thresholds and reads the enabled flag', () => {
-  const config = normalizeAutoResetConfig({
-    fiveHour: { enabled: true, threshold: 70 },
-    week: { enabled: 'yes', threshold: 999 },
-  })
-  assert.deepEqual(config.fiveHour, { enabled: true, threshold: 70 })
-  // A non-boolean enabled is not true; the threshold is clamped to the max.
-  assert.equal(config.week.enabled, false)
-  assert.equal(config.week.threshold, 99.9)
-  // Below-minimum thresholds clamp up, so a typo can never fire instantly.
-  assert.equal(normalizeAutoResetConfig({ week: { enabled: true, threshold: 5 } }).week.threshold, 50)
-})
-
-test('a 99.9 threshold survives normalization instead of rounding to 100', () => {
-  // Rounding here would produce 100 — a value usage can never reach, silently
-  // disabling the window it was configured to protect.
-  const config = normalizeAutoResetConfig({
-    fiveHour: { enabled: true, threshold: 99.9 },
-    week: { enabled: true, threshold: 99.94 },
-  })
-  assert.equal(config.fiveHour.threshold, 99.9)
-  assert.equal(config.week.threshold, 99.9, 'kept to one decimal')
-  assert.ok(config.fiveHour.threshold < 100)
-  // And the guard must actually fire at 99.9, not only above it.
-  assert.equal(evaluateAutoReset({
-    enabled: true, threshold: config.fiveHour.threshold, used: 99.9, armed: true, now: 1,
-  }).spend, true)
-  assert.equal(evaluateAutoReset({
-    enabled: true, threshold: config.fiveHour.threshold, used: 99.8, armed: true, now: 1,
-  }).spend, false)
-})
-
-test('autoResetConfigFor bridges window keys to config keys (the crash regression)', () => {
-  // The host reads config by plan-window key ('5h'/'week') while the config
-  // namespace is 'fiveHour'/'week'. Indexing directly returned undefined and threw
-  // inside the poll timer, which killed the whole desktop host process.
-  const config = normalizeAutoResetConfig({ fiveHour: { enabled: true, threshold: 60 } })
-  assert.equal(autoResetConfigFor(config, '5h').enabled, true)
-  assert.equal(autoResetConfigFor(config, '5h').threshold, 60)
-  assert.equal(autoResetConfigFor(config, 'week').enabled, false)
-  // An unknown or missing key must degrade to a disabled entry, never undefined.
-  for (const key of ['month', 'mcp', undefined, '', 'FIVE_HOUR']) {
-    const entry = autoResetConfigFor(config, key)
-    assert.equal(entry.enabled, false, `key ${String(key)} must read as disabled`)
-    assert.equal(entry.threshold, AUTO_RESET_DEFAULT_THRESHOLD)
-  }
-  assert.equal(autoResetConfigFor(undefined, '5h').enabled, false)
-  assert.equal(autoResetConfigFor(null, 'week').threshold, AUTO_RESET_DEFAULT_THRESHOLD)
-})
-
-test('evaluateAutoReset spends only when enabled, armed and over the threshold', () => {
-  const base = { enabled: true, threshold: 90, armed: true, now: 1_000_000 }
-  assert.equal(evaluateAutoReset({ ...base, used: 91 }).spend, true)
-  assert.equal(evaluateAutoReset({ ...base, used: 90 }).spend, true, 'exactly at threshold fires')
-  assert.equal(evaluateAutoReset({ ...base, used: 89.9 }).spend, false)
-})
-
-test('evaluateAutoReset guards: disabled, no data, disarmed, backoff', () => {
-  const base = { threshold: 90, armed: true, now: 1_000_000 }
-  assert.equal(evaluateAutoReset({ ...base, enabled: false, used: 95 }).reason, 'disabled')
-  assert.equal(evaluateAutoReset({ ...base, enabled: true, used: undefined }).reason, 'no-data')
-  assert.equal(evaluateAutoReset({ ...base, enabled: true, used: 95, armed: false }).reason, 'already-spent')
-  const withBackoff = evaluateAutoReset({
-    ...base, enabled: true, used: 95, lastAttemptAt: 1_000_000 - 5 * 60_000,
-  })
-  assert.equal(withBackoff.spend, false)
-  assert.equal(withBackoff.reason, 'backoff')
-  assert.equal(evaluateAutoReset({
-    ...base, enabled: true, used: 95, lastAttemptAt: 1_000_000 - 11 * 60_000,
-  }).spend, true)
-})
-
-test('evaluateAutoReset re-arms when usage drops back below the threshold', () => {
-  const result = evaluateAutoReset({ enabled: true, threshold: 90, used: 10, armed: false, now: 1 })
-  assert.equal(result.spend, false)
-  assert.equal(result.rearm, true)
-  assert.equal(evaluateAutoReset({ enabled: true, threshold: 90, used: 95, armed: false, now: 1 }).rearm, undefined)
 })

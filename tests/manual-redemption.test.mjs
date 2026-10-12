@@ -50,7 +50,7 @@ function tempOutcomePath(t) {
  *   'nonjson' (HTTP 200 unparseable), 'unclear' (200 without a usable success flag).
  * `onUse` runs when the POST is actually sent (before its answer is produced).
  */
-function makeService(t, { use = USE_OK, plan, list, onUse, manualOutcomePath } = {}) {
+function makeService(t, { use = USE_OK, plan, list, onUse, onList, manualOutcomePath, providerId = 'zai-coding-cn' } = {}) {
   const calls = []
   // Mutable per-test transport state so a scenario can break an endpoint only
   // AFTER the spend (e.g. the acknowledgement's fresh recheck must fail).
@@ -71,6 +71,7 @@ function makeService(t, { use = USE_OK, plan, list, onUse, manualOutcomePath } =
       return respond(answer)
     }
     if (target.includes('/customer-package-reset/list')) {
+      if (onList) await onList()
       return state.list === 'fail' ? new Response('{}', { status: 503 }) : respond({ status: 200, body: CARDS })
     }
     if (target.includes('/api/monitor/usage/quota/limit')) {
@@ -83,7 +84,7 @@ function makeService(t, { use = USE_OK, plan, list, onUse, manualOutcomePath } =
   const service = createIsolatedQuotaService(
     {
       logger: { info: () => {}, warn: () => {} },
-      settings: { describe: () => [{ ns: 'llm-pi-ai', value: { providers: { 'zai-coding-cn': { apiKeyEnv: 'GLM_TEST_KEY' } } } }] },
+      settings: { describe: () => [{ ns: 'llm-pi-ai', value: { providers: { [providerId]: { apiKeyEnv: 'GLM_TEST_KEY' } } } }] },
       credentials: { resolve: async () => ({ value: 'synthetic-glm-key' }), readRecord: async () => undefined },
     },
     { logMirror: () => {}, fetchImpl, ...(manualOutcomePath !== undefined ? { manualOutcomePath } : {}) },
@@ -427,4 +428,72 @@ test('an in-flight POST cannot be acknowledged through either route', async (t) 
 
   releaseUse()
   assert.equal((await pending).ok, true)
+})
+
+// --- Task 6: manual/wallet cases migrated from the retired auto-reset file ---
+
+test('a manual spend waits for an in-flight background wallet read before using a live card', async (t) => {
+  let releaseList, listStarted
+  const gate = new Promise((resolve) => { releaseList = resolve })
+  const entered = new Promise((resolve) => { listStarted = resolve })
+  let firstList = true
+  const { service, calls } = makeService(t, {
+    onList: () => {
+      if (firstList) {
+        firstList = false
+        listStarted()
+        return gate
+      }
+      return undefined
+    },
+  })
+
+  const poll = service.refresh()
+  await entered
+  const manual = service.useResetCard({ resetType: 'WEEK' })
+  await Promise.resolve()
+  assert.equal(useCalls(calls).length, 0, 'a spend never overtakes the background read')
+  releaseList()
+  assert.equal((await manual).ok, true)
+  await poll
+  assert.equal(useCalls(calls).length, 1)
+  assert.ok(calls.filter((url) => url.includes('/customer-package-reset/list')).length >= 3,
+    'spending still re-lists immediately before use and once afterwards')
+})
+
+test('a manual spend in flight rejects a simultaneous second manual spend', async (t) => {
+  let releaseList, listStarted
+  const gate = new Promise((resolve) => { releaseList = resolve })
+  const entered = new Promise((resolve) => { listStarted = resolve })
+  let firstList = true
+  const { service, calls } = makeService(t, {
+    onList: () => {
+      if (firstList) {
+        firstList = false
+        listStarted()
+        return gate
+      }
+      return undefined
+    },
+  })
+
+  // The spend's own pre-POST re-list is the gated request: the second manual
+  // call must see resetSpendInFlight and refuse, never queue a second POST.
+  const first = service.useResetCard({ resetType: 'WEEK' })
+  await entered
+  assert.equal((await service.useResetCard({ resetType: 'WEEK' })).error, 'busy')
+  releaseList()
+  assert.equal((await first).ok, true)
+  await service.refresh()
+  assert.equal(useCalls(calls).length, 1)
+})
+
+test('an international GLM provider never sees the domestic reset endpoints', async (t) => {
+  const { service, calls } = makeService(t, { providerId: 'zai' })
+  await service.refresh()
+  assert.equal(service.overview().providers.find((item) => item.key === 'glm').providerId, 'zai')
+  assert.equal((await service.listResetCards()).error, 'unsupported-provider')
+  assert.equal((await service.useResetCard({ resetType: 'WEEK' })).error, 'unsupported-provider')
+  assert.equal(calls.filter((url) => url.includes('customer-package-reset')).length, 0,
+    'the reset-card API stays domestic-only, even via direct HTTP')
 })

@@ -1,15 +1,10 @@
-import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { credentialKey, credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
 import { buildCopilotProbe, buildGlmProbe, buildGlmUsageProbe, parseCopilotUser, parseGlmPlan, parseGlmUsage, usageDayWindow } from './core/adapters.mjs'
 import {
-  autoResetConfigFor,
   buildResetListSpec,
   buildResetUseSpec,
-  evaluateAutoReset,
-  normalizeAutoResetConfig,
   normalizeResetType,
   parseResetCards,
   parseResetUseResult,
@@ -17,7 +12,6 @@ import {
   publicResetCards,
   resetWindow,
   RESET_TIMEOUT_MS,
-  windowKeyForResetType,
 } from './core/reset.mjs'
 import { retireLegacyAutoResetSettings } from './core/legacy-auto-settings.mjs'
 import { createManualOutcomeJournal } from './core/manual-outcome.mjs'
@@ -133,10 +127,9 @@ function requestAllowed(ctx, req, res) {
 }
 
 /**
- * Where the panel's auto-reset switches persist.
- * These live in a file rather than the browser because the whole point of the
- * feature is to protect long runs with no browser open: a switch stored in
- * localStorage would silently stop working the moment the tab closed.
+ * Where the legacy automatic-use switches persisted. The start()-time one-shot
+ * retirement keeps this file overwritten all-off, so a rollback to an old
+ * package cannot silently revive the authorization.
  */
 export function resolveAutoResetSettingsPath(env = process.env) {
   const home = typeof env?.DSH_HOME === 'string' && env.DSH_HOME.trim() !== ''
@@ -153,35 +146,6 @@ export function resolveManualOutcomePath(env = process.env) {
   return join(home, 'glm-quota-reset', 'manual-outcome.json')
 }
 
-/**
- * Read the saved auto-reset switches.
- * Only a genuinely missing file falls back to the profile config. An unreadable
- * or corrupt saved file fails CLOSED to both switches off: otherwise a previously
- * disabled switch could silently revive from an enabled profile default.
- */
-export function readAutoResetSettings(path) {
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    return asRecord(parsed?.autoReset) ?? normalizeAutoResetConfig(undefined)
-  } catch (error) {
-    return error?.code === 'ENOENT' ? undefined : normalizeAutoResetConfig(undefined)
-  }
-}
-
-/** Replace the switches atomically; throws so the caller can report a failed write. */
-export function writeAutoResetSettings(path, autoReset) {
-  const directory = dirname(path)
-  mkdirSync(directory, { recursive: true })
-  const tempPath = join(directory, `.quota-reset-${randomUUID()}.tmp`)
-  try {
-    writeFileSync(tempPath, `${JSON.stringify({ autoReset }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-    renameSync(tempPath, path)
-  } catch (error) {
-    try { unlinkSync(tempPath) } catch { /* No temp file when opening failed. */ }
-    throw error
-  }
-}
-
 export function createQuotaService(ctx, options = {}) {
   const fetchImpl = options.fetchImpl ?? globalThis.fetch
   const now = options.now ?? Date.now
@@ -194,12 +158,6 @@ export function createQuotaService(ctx, options = {}) {
   // Single-entry write-ahead journal for one manual card attempt; every state
   // transition is durable before anyone is told anything.
   const manualJournal = createManualOutcomeJournal(manualOutcomePath)
-  // A saved switch wins over the profile config: the panel is the user-facing
-  // control, and the profile value is only the initial default.
-  const savedAutoReset = readAutoResetSettings(settingsPath)
-  let autoResetConfig = normalizeAutoResetConfig(savedAutoReset ?? options.autoReset)
-  let autoResetSource = savedAutoReset === undefined ? 'config' : 'saved'
-  let autoResetPersistError
   const providers = new Map([
     ['glm', initialProvider('glm', 'GLM Coding Plan')],
     ['copilot', initialProvider('copilot', 'GitHub Copilot')],
@@ -209,75 +167,13 @@ export function createQuotaService(ctx, options = {}) {
   let timer
   let disposed = false
   let coldAttempts = 0
-  // One guard flag + one backoff stamp per window; `armed` starts true so an
-  // install whose quota is already over the threshold at boot gets protected.
-  const autoResetArmed = { '5h': true, week: true }
-  const autoResetLastAttempt = { '5h': undefined, week: undefined }
-  let autoResetEvent
   let legacyRetirement
-
-  const AUTO_RESET_WINDOWS = Object.freeze([['5h', 'fiveHour'], ['week', 'week']])
-
-  /** The browser-safe auto-reset projection: config, guards and the last event. */
-  function autoResetView() {
-    const shape = (windowKey) => {
-      const config = autoResetConfigFor(autoResetConfig, windowKey)
-      return {
-        enabled: config.enabled,
-        threshold: config.threshold,
-        armed: autoResetArmed[windowKey],
-        ...(autoResetLastAttempt[windowKey] !== undefined
-          ? { lastAttemptAt: autoResetLastAttempt[windowKey] }
-          : {}),
-      }
-    }
-    return {
-      fiveHour: shape('5h'),
-      week: shape('week'),
-      source: autoResetSource,
-      ...(autoResetPersistError !== undefined ? { persistError: autoResetPersistError } : {}),
-      ...(autoResetEvent !== undefined ? { lastEvent: autoResetEvent } : {}),
-    }
-  }
-
-  /**
-   * Apply switches from the panel and persist them.
-   * Enabling a window re-arms it and clears its backoff, because the reason to
-   * enable one is usually "we are about to run out right now" — carrying a stale
-   * disarm or backoff over from a previous state would silently do nothing.
-   * Disabling never touches the guards, but off-then-on deliberately re-arms:
-   * treat re-enabling as a new, potentially immediate spending authorization.
-   */
-  function updateAutoResetConfig(patch) {
-    const previous = autoResetConfig
-    const next = normalizeAutoResetConfig(patch)
-    autoResetConfig = next
-    autoResetSource = 'saved'
-    for (const [windowKey, configKey] of AUTO_RESET_WINDOWS) {
-      const wasEnabled = asRecord(previous?.[configKey])?.enabled === true
-      const isEnabled = asRecord(next?.[configKey])?.enabled === true
-      if (isEnabled && !wasEnabled) {
-        autoResetArmed[windowKey] = true
-        autoResetLastAttempt[windowKey] = undefined
-      }
-    }
-    try {
-      writeAutoResetSettings(settingsPath, next)
-      autoResetPersistError = undefined
-    } catch (error) {
-      // The switch is live for this process either way; report that it will not
-      // survive a restart instead of pretending the write succeeded.
-      autoResetPersistError = error instanceof Error ? error.message : String(error)
-    }
-    return { ok: true, autoReset: autoResetView() }
-  }
 
   function view() {
     return {
       ...(updatedAt !== undefined ? { updatedAt } : {}),
       ...(resetState !== undefined ? { reset: resetView() } : {}),
       ...manualOutcomeView(),
-      autoReset: autoResetView(),
       providers: ['glm', 'copilot'].map((key) => {
         const provider = providers.get(key)
         return {
@@ -525,16 +421,7 @@ export function createQuotaService(ctx, options = {}) {
     }
   }
 
-  // --- Automatic card use -----------------------------------------------------
-  // Both windows default to OFF; enabling is a profile-config decision (see
-  // cordis.patch.yml). When enabled, the check runs after every poll round and
-  // spends the earliest-expiring available card once usage crosses the threshold.
-  // Two guards keep one episode from burning the whole wallet:
-  //   armed     — cleared after a spend, re-armed only when usage falls back
-  //               below the threshold (which is what a successful reset does).
-  //   backoff   — a failed attempt waits AUTO_RESET_RETRY_INTERVAL_MS before the
-  //               same window is retried, so a persistent error cannot hammer
-  //               the upstream every poll.
+  // --- Reset cards -----------------------------------------------------------
 
   function refresh(forceCards = false) {
     if (pollPromise !== undefined) {
@@ -671,7 +558,7 @@ export function createQuotaService(ctx, options = {}) {
    * used; this function re-lists first so the choice is made against live state,
    * then re-probes the quota so the panel reflects the reset immediately.
    */
-  async function useResetCard(args = {}, autoWindowKey) {
+  async function useResetCard(args = {}) {
     if (resetSpendInFlight) return { ok: false, error: 'busy', message: '重置操作进行中，请稍后重试' }
     const guard = manualConsumptionGuard()
     if (guard !== undefined) return guard
@@ -680,13 +567,13 @@ export function createQuotaService(ctx, options = {}) {
       // A spend re-lists against live state; wait for any cosmetic background
       // read first so its older result cannot overwrite the post-spend wallet.
       if (resetProbePromise !== undefined) await resetProbePromise
-      return await performResetCard(args, autoWindowKey)
+      return await performResetCard(args)
     } finally {
       resetSpendInFlight = false
     }
   }
 
-  async function performResetCard({ resetType, recordId } = {}, autoWindowKey) {
+  async function performResetCard({ resetType, recordId } = {}) {
     const type = normalizeResetType(resetType)
     if (type === undefined) return { ok: false, error: 'invalid-type', message: '未知的重置类型' }
     const credential = await resetCredential()
@@ -704,26 +591,6 @@ export function createQuotaService(ctx, options = {}) {
       const { message, kind } = classifyProbeError(error)
       resetState = { status: 'error', error: message, errorKind: kind, checkedAt: now() }
       return { ok: false, error: 'list-failed', message }
-    }
-
-    if (autoWindowKey !== undefined) {
-      const current = providers.get('glm')
-      const window = current?.plan?.windows?.find((row) => row?.key === autoWindowKey)
-      const config = autoResetConfigFor(autoResetConfig, autoWindowKey)
-      const decision = evaluateAutoReset({
-        enabled: config.enabled,
-        threshold: config.threshold,
-        used: window?.percent,
-        armed: autoResetArmed[autoWindowKey],
-        lastAttemptAt: autoResetLastAttempt[autoWindowKey],
-        now: now(),
-      })
-      // List/credential awaits give manual spending, a new probe or a switch-off
-      // time to intervene. Recheck *after* them, immediately before the POST.
-      if (windowKeyForResetType(type) !== autoWindowKey || current?.status !== 'ready' || !decision.spend) {
-        return { ok: false, error: 'auto-skipped', message: '自动重置条件已变化，未消耗卡' }
-      }
-      autoResetLastAttempt[autoWindowKey] = now()
     }
 
     const picked = pickResetCard(cards, type, recordId)
@@ -826,13 +693,7 @@ export function createQuotaService(ctx, options = {}) {
       }
     }
 
-    // Disarm immediately after a confirmed spend, BEFORE follow-up network calls.
-    // A weekly card also clears the 5h window; disarming both avoids spending a
-    // second card on a snapshot captured before the weekly reset took effect.
     const cleared = resetWindow(type)
-    const spentWindow = windowKeyForResetType(type)
-    if (spentWindow !== undefined) autoResetArmed[spentWindow] = false
-    if (cleared?.alsoClears !== undefined) autoResetArmed[cleared.alsoClears] = false
 
     // The card is gone now: refresh both the card list and the quota windows so the
     // panel shows the post-reset state without a manual reload.
@@ -854,77 +715,6 @@ export function createQuotaService(ctx, options = {}) {
       manualOutcome: outcomeProjection(stored.status),
       ...(after.ok ? { cards: after.cards } : {}),
       quota: view().providers.find((provider) => provider.key === 'glm'),
-    }
-  }
-
-  /**
-   * Spend a card automatically when an enabled window crosses its threshold.
-   * Called once per poll round, after the probes have landed. Disabled, stale,
-   * already-spent and no-data windows skip without noisy per-poll logging; every
-   * actual POST attempt records success or failure for the panel and host log.
-   *
-   * The whole body is guarded: this runs on the poll timer, where a throw becomes
-   * an unhandled rejection and takes the host process down with it. A defect in
-   * automatic spending must never be able to do that, so it degrades to a log line.
-   */
-  async function maybeAutoReset() {
-    if (disposed) return
-    try {
-      // Never spend from markFailure's last-good (stale) plan: its percent may
-      // describe a window that has already rolled over or been manually reset.
-      if (providers.get('glm')?.status !== 'ready') return
-      // Weekly cards clear 5h too. Evaluate them first, and read the current plan
-      // per iteration instead of keeping the pre-spend snapshot for both windows.
-      for (const resetType of ['WEEK', 'FIVE_HOUR']) {
-        const windowKey = windowKeyForResetType(resetType)
-        if (windowKey === undefined) continue
-        const provider = providers.get('glm')
-        if (provider?.status !== 'ready') break
-        const config = autoResetConfigFor(autoResetConfig, windowKey)
-        const row = provider.plan?.windows?.find((window) => window?.key === windowKey)
-        const decision = evaluateAutoReset({
-          enabled: config.enabled,
-          threshold: config.threshold,
-          used: row?.percent,
-          armed: autoResetArmed[windowKey],
-          lastAttemptAt: autoResetLastAttempt[windowKey],
-          now: now(),
-        })
-        if (decision.rearm === true) autoResetArmed[windowKey] = true
-        if (!decision.spend) continue
-
-        const result = await useResetCard({ resetType }, windowKey)
-        if (result.error === 'auto-skipped' || result.error === 'busy') continue
-        // Includes list failures: they must still respect the 10-minute retry
-        // backoff. A skip/busy is not a real attempt and must not start one.
-        autoResetLastAttempt[windowKey] = now()
-        if (result.ok === true) {
-          // Disarm until usage drops back below the threshold, which a successful
-          // reset causes on the next probe.
-          autoResetArmed[windowKey] = false
-          autoResetEvent = {
-            kind: 'auto',
-            resetType,
-            window: windowKey,
-            recordId: result.recordId,
-            at: now(),
-          }
-          logAuto('info', `quota-watch: auto-reset spent a ${resetType} card (window ${windowKey} was at or past ${config.threshold}%)`)
-        } else {
-          autoResetEvent = {
-            kind: 'auto-failed',
-            resetType,
-            window: windowKey,
-            at: now(),
-            message: result.message,
-          }
-          logAuto('warn', `quota-watch: auto-reset for ${windowKey} failed (${result.error ?? 'unknown'})`)
-        }
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      autoResetEvent = { kind: 'auto-failed', window: 'unknown', at: now(), message }
-      logAuto('warn', `quota-watch: auto-reset check failed: ${message}`)
     }
   }
 
@@ -1012,7 +802,6 @@ export function createQuotaService(ctx, options = {}) {
     useResetCard,
     acknowledgeManualOutcome,
     acknowledgeKnownReceipt,
-    updateAutoResetConfig,
     start() {
       if (disposed || timer !== undefined) return
       // One-time retirement of the legacy automatic-use switches, BEFORE any
@@ -1175,27 +964,22 @@ export function makeResetReceiptRoute(ctx, service) {
   }
 }
 
+const RETIRED_AUTO_RESET_PATH = '/api/dsh-quota-watch/auto-reset'
+
 /**
- * Apply the panel's auto-reset switches.
- * POST-only for the same reason as the spend route: this arms automatic spending,
- * so nothing that a link, prefetch or image can trigger may reach it.
+ * Retired automatic-authorization endpoint: a tombstone for old clients.
+ * A POST returns 410 without reading the body, touching any setting or spending
+ * anything — no code path that could re-arm automatic spending exists anymore.
+ * The path is a private host constant precisely so it never re-enters the
+ * shared client contract in src/shared.mjs.
  */
-export function makeAutoResetRoute(ctx, service) {
+export function makeRetiredAutoResetRoute(ctx) {
   return {
     kind: 'exact',
-    path: ROUTES.autoReset,
+    path: RETIRED_AUTO_RESET_PATH,
     handler: async (req, res) => {
       if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
-      const payload = await readJsonBody(req)
-      if (payload === undefined) {
-        responseJson(res, 400, { ok: false, error: 'invalid-body', message: '请求体不是合法 JSON' })
-        return
-      }
-      try {
-        responseJson(res, 200, service.updateAutoResetConfig(payload))
-      } catch {
-        responseJson(res, 500, { ok: false, error: 'auto-reset-failed', message: '自动重置设置保存失败' })
-      }
+      responseJson(res, 410, { ok: false, error: 'retired', message: '自动用卡功能已退役；重置卡请在面板手动确认使用' })
     },
   }
 }
@@ -1220,7 +1004,7 @@ async function readJsonBody(req, limitBytes = 8 * 1024) {
 }
 
 export function apply(ctx, config = {}) {
-  const service = createQuotaService(ctx, { pollIntervalSec: config.pollIntervalSec, autoReset: config.autoReset })
+  const service = createQuotaService(ctx, { pollIntervalSec: config.pollIntervalSec })
   const disposers = [
     ctx.webServer.register(makeOverviewRoute(ctx, service)),
     ctx.webServer.register(makeRefreshRoute(ctx, service)),
@@ -1228,7 +1012,7 @@ export function apply(ctx, config = {}) {
     ctx.webServer.register(makeResetUseRoute(ctx, service)),
     ctx.webServer.register(makeResetAcknowledgeRoute(ctx, service)),
     ctx.webServer.register(makeResetReceiptRoute(ctx, service)),
-    ctx.webServer.register(makeAutoResetRoute(ctx, service)),
+    ctx.webServer.register(makeRetiredAutoResetRoute(ctx)),
   ]
   service.start()
   ctx.effect(() => () => {

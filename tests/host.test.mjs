@@ -5,7 +5,16 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, resolve } from 'node:path'
-import { classifyProbeError, makeOverviewRoute, makeRefreshRoute, makeResetAcknowledgeRoute, makeResetReceiptRoute } from '../src/host.mjs'
+import {
+  classifyProbeError,
+  makeOverviewRoute,
+  makeRefreshRoute,
+  makeResetAcknowledgeRoute,
+  makeResetReceiptRoute,
+  makeRetiredAutoResetRoute,
+  resolveAutoResetSettingsPath,
+  resolveManualOutcomePath,
+} from '../src/host.mjs'
 import { CLIENT_ROUTES, ROUTES } from '../src/shared.mjs'
 import { createIsolatedQuotaService } from './support/isolated-service.mjs'
 
@@ -283,6 +292,22 @@ function pairedRequest({ method = 'GET', origin = 'https://dsh.example' } = {}) 
   }
 }
 
+/** A request with a JSON body chunk stream, for handlers that read bodies. */
+function postJsonRequest(base, body) {
+  const chunks = [Buffer.from(JSON.stringify(body))]
+  return {
+    ...base,
+    [Symbol.asyncIterator]() {
+      let index = 0
+      return {
+        next: async () => (index < chunks.length
+          ? { value: chunks[index++], done: false }
+          : { value: undefined, done: true }),
+      }
+    },
+  }
+}
+
 test('overview route requires paired access and returns no-store JSON', () => {
   const ctx = { remoteWebUiPairing: { isPairedDevice: (request) => request.headers.cookie === 'paired=1' } }
   const service = { overview: () => ({ providers: [], updatedAt: 1 }) }
@@ -505,6 +530,103 @@ test('without credentials the cold interval never engages (no high-frequency pro
   } finally {
     service.stop()
     t.mock.timers.reset()
+  }
+})
+
+// --- Task 6: the automatic strategy is fully retired -------------------------
+
+test('the wallet poll stays read-only on its ten-minute gate; force bypasses it', async (t) => {
+  let clock = 1_700_000_000_000
+  let failList = false
+  const healthy = recordingFetch()
+  const fetchImpl = (url, init) => {
+    if (failList && String(url).includes('/customer-package-reset/list')) {
+      return Promise.resolve(new Response('{}', { status: 503 }))
+    }
+    return healthy(url, init)
+  }
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  const listCount = () => healthy.calls.filter((call) => call.url.includes('/customer-package-reset/list')).length
+  try {
+    await service.refresh()
+    assert.equal(listCount(), 1, 'the first poll learns the wallet read-only')
+    assert.equal(service.overview().reset.status, 'ready')
+    clock += 9 * 60_000
+    await service.refresh()
+    assert.equal(listCount(), 1, 'the 60-second quota poll does not imply a card-list request')
+    await service.refresh(true)
+    assert.equal(listCount(), 2, '立即刷新 bypasses the wallet gate')
+    clock += 9 * 60_000
+    await service.refresh()
+    assert.equal(listCount(), 2, 'the forced check resets the ten-minute clock')
+    clock += 60_000
+    failList = true
+    await service.refresh()
+    assert.equal(service.overview().reset.status, 'error', 'wallet failure stays separate from ready GLM quota')
+    clock += 60_000
+    await service.refresh()
+    assert.equal(listCount(), 2, 'failed listing still starts a quiet period')
+    failList = false
+    clock += 9 * 60_000
+    await service.refresh()
+    assert.equal(listCount(), 3, 'the wallet recovers at the next due round')
+    assert.equal(spendCalls(healthy).length, 0, 'no poll path ever spends')
+  } finally { service.stop() }
+})
+
+test('the overview snapshot carries no automatic-strategy state', async () => {
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl })
+  try {
+    await service.refresh()
+    const overview = service.overview()
+    assert.equal('autoReset' in overview, false)
+    assert.equal(overview.autoReset, undefined)
+  } finally { service.stop() }
+})
+
+test('the retired auto-reset endpoint is a 410 tombstone without any side effect', async (t) => {
+  const settingsPath = tempLegacySettings(t, {
+    autoReset: { fiveHour: { enabled: true, threshold: 90 }, week: { enabled: true, threshold: 90 } },
+  })
+  const before = readFileSync(settingsPath, 'utf8')
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, legacyAutoSettingsPath: settingsPath })
+  try {
+    const route = makeRetiredAutoResetRoute({ remoteWebUiPairing: { isPairedDevice: () => true } })
+    assert.equal(route.kind, 'exact')
+    assert.equal(route.path, '/api/dsh-quota-watch/auto-reset')
+
+    const wrongMethod = fakeResponse()
+    await route.handler(pairedRequest({ method: 'GET' }), wrongMethod)
+    assert.equal(wrongMethod.statusCode, 405)
+
+    const crossSite = fakeResponse()
+    await route.handler(pairedRequest({ method: 'POST', origin: 'https://attacker.example' }), crossSite)
+    assert.equal(crossSite.statusCode, 403)
+
+    // A paired POST carrying a full re-authorization body: 410, the body is
+    // never read, nothing is written, nothing is consumed.
+    const tombstone = fakeResponse()
+    await route.handler(postJsonRequest(pairedRequest({ method: 'POST' }), {
+      fiveHour: { enabled: true }, week: { enabled: true },
+    }), tombstone)
+    assert.equal(tombstone.statusCode, 410)
+    assert.equal(JSON.parse(tombstone.body).error, 'retired')
+    assert.equal(readFileSync(settingsPath, 'utf8'), before, 'the saved switches file is untouched')
+    assert.equal(spendCalls(fetchImpl).length, 0, 'no card POST anywhere')
+  } finally { service.stop() }
+})
+
+test('legacy settings and manual outcome path resolvers honour DSH_HOME and default to ~/.dsh', () => {
+  for (const [resolver, file] of [
+    [resolveAutoResetSettingsPath, 'settings.json'],
+    [resolveManualOutcomePath, 'manual-outcome.json'],
+  ]) {
+    const escaped = file.replaceAll('.', '\\.')
+    assert.equal(resolver({ DSH_HOME: 'D:\\custom' }).replaceAll('\\', '/'), `D:/custom/glm-quota-reset/${file}`)
+    assert.match(resolver({}).replaceAll('\\', '/'), new RegExp(`/\\.dsh/glm-quota-reset/${escaped}$`))
+    assert.match(resolver({ DSH_HOME: '   ' }).replaceAll('\\', '/'), new RegExp(`/\\.dsh/glm-quota-reset/${escaped}$`))
   }
 })
 

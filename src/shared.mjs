@@ -7,7 +7,6 @@ export const ROUTES = Object.freeze({
   resetUse: `${API_PREFIX}/reset-cards/use`,
   resetAcknowledge: `${API_PREFIX}/reset-cards/acknowledge`,
   resetReceipt: `${API_PREFIX}/reset-cards/receipt`,
-  autoReset: `${API_PREFIX}/auto-reset`,
 })
 
 // The Web UI is served under <base href="./">; clients must use document-relative paths.
@@ -18,7 +17,6 @@ export const CLIENT_ROUTES = Object.freeze({
   resetUse: `${API_PREFIX.slice(1)}/reset-cards/use`,
   resetAcknowledge: `${API_PREFIX.slice(1)}/reset-cards/acknowledge`,
   resetReceipt: `${API_PREFIX.slice(1)}/reset-cards/receipt`,
-  autoReset: `${API_PREFIX.slice(1)}/auto-reset`,
 })
 
 export const PROVIDER_IDS = Object.freeze({
