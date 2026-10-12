@@ -29,6 +29,8 @@ export const name = 'quota-watch'
 export const inject = ['webServer', 'settings', 'credentials']
 
 const COPILOT_CREDENTIAL_KEY = credentialKey('llm-pi-ai', PROVIDER_IDS.copilot)
+/** How long a continuous GLM usage failure may keep showing old numbers before the client must degrade. */
+const GLM_USAGE_FAILURE_STALE_MS = 5 * 60_000
 const GLM_PROVIDER_IDS = [
   PROVIDER_IDS.glmDomestic,
   PROVIDER_IDS.glmInternational,
@@ -169,6 +171,15 @@ export function createQuotaService(ctx, options = {}) {
   let coldAttempts = 0
   let legacyRetirement
 
+  /** The usage slice a browser may see: old values survive only while the failure episode is short. */
+  function usageView(usage) {
+    if (usage === undefined) return undefined
+    const tooLong = usage.status !== 'ready'
+      && typeof usage.failureSince === 'number'
+      && now() - usage.failureSince >= GLM_USAGE_FAILURE_STALE_MS
+    return tooLong ? { ...usage, staleTooLong: true } : usage
+  }
+
   function view() {
     return {
       ...(updatedAt !== undefined ? { updatedAt } : {}),
@@ -188,7 +199,7 @@ export function createQuotaService(ctx, options = {}) {
           ...(provider.errorKind !== undefined ? { errorKind: provider.errorKind } : {}),
           ...(provider.plan !== undefined ? { plan: provider.plan } : {}),
           ...(provider.quota !== undefined ? { quota: provider.quota } : {}),
-          ...(provider.usage !== undefined ? { usage: provider.usage } : {}),
+          ...(provider.usage !== undefined ? { usage: usageView(provider.usage) } : {}),
         }
       }),
     }
@@ -286,6 +297,8 @@ export function createQuotaService(ctx, options = {}) {
       credential: 'configured',
       updatedAt: at,
       checkedAt: at,
+      // A fresh ready block: the previous episode's failureSince (if any) and
+      // any projected staleTooLong end here by construction.
       usage: { status: 'ready', updatedAt: at, ...usage },
     })
     logTransition('glm-usage', previous.usage?.status ?? 'loading', 'ready')
@@ -299,6 +312,12 @@ export function createQuotaService(ctx, options = {}) {
       : undefined
     const { message, kind } = classifyProbeError(error)
     const status = lastGood !== undefined ? 'stale' : 'error'
+    // One timestamp per continuous failure episode: later failing rounds keep
+    // the FIRST failure's stamp so elapsed time can gate client degradation
+    // without waiting for another probe round.
+    const failureSince = typeof previous.usage?.failureSince === 'number' && previous.usage.status !== 'ready'
+      ? previous.usage.failureSince
+      : now()
     providers.set('glm', {
       ...previous,
       checkedAt: now(),
@@ -307,6 +326,7 @@ export function createQuotaService(ctx, options = {}) {
         status,
         error: message,
         errorKind: kind,
+        failureSince,
       },
     })
     logTransition('glm-usage', previous.usage?.status ?? 'loading', status, message)

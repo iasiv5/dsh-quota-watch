@@ -533,6 +533,119 @@ test('without credentials the cold interval never engages (no high-frequency pro
   }
 })
 
+// --- Task 7: continuous usage-failure timing ---------------------------------
+
+const USAGE_FAIL_STALE_MS = 5 * 60_000
+
+/** A usage-focused service stub with an injectable clock and togglable failures. */
+function usageTimingService(t) {
+  let clock = 1_700_000_000_000
+  const state = {
+    planFails: false,
+    usageFails: false,
+  }
+  const calls = []
+  const fetchImpl = async (url) => {
+    const target = String(url)
+    calls.push(target)
+    if (target.includes('model-usage')) {
+      if (state.usageFails) return new Response('{}', { status: 500 })
+      return new Response(JSON.stringify(syntheticUsage), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    if (target.includes('/api/monitor/usage/quota/limit')) {
+      if (state.planFails) return new Response('{}', { status: 503 })
+      return new Response(JSON.stringify(highUsagePlan), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    if (target.includes('/customer-package-reset/list')) {
+      return new Response(JSON.stringify(syntheticCards), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    if (target.includes('api.github.com')) return new Response('unauthorized', { status: 401 })
+    return new Response('{}', { status: 404 })
+  }
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  t.after(() => service.stop())
+  return {
+    service,
+    calls,
+    state,
+    tick: (ms) => { clock += ms },
+    glmUsage: () => service.overview().providers.find((provider) => provider.key === 'glm').usage,
+  }
+}
+
+test('failureSince stamps the first real failure and stays constant across consecutive failures', async (t) => {
+  const harness = usageTimingService(t)
+  await harness.service.refresh()
+  assert.equal(harness.glmUsage().status, 'ready')
+  assert.equal(harness.glmUsage().failureSince, undefined)
+
+  harness.state.usageFails = true
+  await harness.service.refresh()
+  const firstFailureAt = harness.glmUsage().failureSince
+  assert.equal(harness.glmUsage().status, 'stale')
+  assert.equal(typeof firstFailureAt, 'number')
+
+  harness.tick(60_000)
+  await harness.service.refresh()
+  assert.equal(harness.glmUsage().status, 'stale', 'still failing')
+  assert.equal(harness.glmUsage().failureSince, firstFailureAt, 'a continuous episode keeps its first stamp')
+})
+
+test('an overview read alone flips staleTooLong after five minutes of continuous failure', async (t) => {
+  const harness = usageTimingService(t)
+  await harness.service.refresh()
+  harness.state.usageFails = true
+  await harness.service.refresh()
+  assert.equal(harness.glmUsage().staleTooLong, undefined, 'a fresh failure is not yet "too long"')
+
+  harness.tick(USAGE_FAIL_STALE_MS)
+  const callsBefore = harness.calls.length
+  const usage = harness.glmUsage()
+  assert.equal(usage.staleTooLong, true, 'the host clock projects the degradation without a new probe')
+  assert.equal(harness.calls.length, callsBefore, 'no extra upstream request is needed')
+  assert.equal(typeof usage.totalTokens, 'number', 'the snapshot still carries the last-good values; the client decides what to show')
+})
+
+test('a successful usage probe clears both failure fields', async (t) => {
+  const harness = usageTimingService(t)
+  await harness.service.refresh()
+  harness.state.usageFails = true
+  await harness.service.refresh()
+  assert.equal(harness.glmUsage().status, 'stale')
+
+  harness.tick(USAGE_FAIL_STALE_MS + 1)
+  harness.state.usageFails = false
+  await harness.service.refresh()
+  const usage = harness.glmUsage()
+  assert.equal(usage.status, 'ready')
+  assert.equal(usage.failureSince, undefined)
+  assert.equal(usage.staleTooLong, undefined)
+})
+
+test('waiting without a real failure never produces a failure episode', async (t) => {
+  const harness = usageTimingService(t)
+  await harness.service.refresh()
+  harness.tick(10 * USAGE_FAIL_STALE_MS)
+  await harness.service.refresh()
+  const usage = harness.glmUsage()
+  assert.equal(usage.status, 'ready')
+  assert.equal(usage.failureSince, undefined)
+  assert.equal(usage.staleTooLong, undefined)
+})
+
+test('a first failure without last-good values reports error and starts the episode', async (t) => {
+  const harness = usageTimingService(t)
+  harness.state.usageFails = true
+  await harness.service.refresh()
+  const usage = harness.glmUsage()
+  assert.equal(usage.status, 'error')
+  assert.equal(typeof usage.failureSince, 'number', 'even an error episode is timestamped')
+  assert.equal(usage.totalTokens, undefined)
+
+  harness.tick(USAGE_FAIL_STALE_MS)
+  assert.equal(harness.glmUsage().staleTooLong, true)
+})
+
 // --- Task 6: the automatic strategy is fully retired -------------------------
 
 test('the wallet poll stays read-only on its ten-minute gate; force bypasses it', async (t) => {
