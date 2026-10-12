@@ -1,5 +1,6 @@
 import { CLIENT_POLL_INTERVAL_MS, CLIENT_ROUTES, PROVIDER_IDS } from './shared.mjs'
 import { remainingToUsed } from './core/adapters.mjs'
+import { parseResetExpiryTime } from './core/reset.mjs'
 import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags, titlebarTopInset } from './client/prefs.mjs'
 import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 
@@ -66,6 +67,7 @@ const COPY = {
       none: '无可用',
       use: '重置',
       expiry: '{date} 前有效',
+      expiryAssumed: '无时区字段按北京时间解读，非上游官方说明',
       confirmTitle: '确认使用重置卡？',
       confirmWeek: '将消耗 1 张每周重置卡，立即重置每周额度与 5 小时额度。',
       confirmFiveHour: '将消耗 1 张 5 小时重置卡，立即重置 5 小时额度。',
@@ -127,6 +129,7 @@ const COPY = {
       none: 'none',
       use: 'Reset',
       expiry: 'expires {date}',
+      expiryAssumed: 'No-zone stamps are read as Beijing time — not an official upstream statement',
       confirmTitle: 'Use a reset card?',
       confirmWeek: 'This spends 1 weekly reset card and immediately resets both the weekly and 5-hour quotas.',
       confirmFiveHour: 'This spends 1 5-hour reset card and immediately resets the 5-hour quota.',
@@ -324,18 +327,24 @@ function formatPercent(value, locale) {
 }
 
 /** The earliest expiry among available cards as MM/DD — the card a default spend picks. */
+/** The earliest-expiring card by the SHARED parser (host picking uses the same
+ * one, so display and selection can never disagree). */
+function earliestExpiryCard(cards) {
+  let best
+  for (const card of Array.isArray(cards) ? cards : []) {
+    const parsed = parseResetExpiryTime(card?.expireTime)
+    if (parsed === undefined) continue
+    if (best === undefined || parsed < best.parsed) best = { card, parsed }
+  }
+  return best
+}
+
 function earliestExpiryLabel(cards) {
-  const stamps = (Array.isArray(cards) ? cards : [])
-    .map((card) => {
-      const text = typeof card?.expireTime === 'string' ? card.expireTime : ''
-      const parsed = Date.parse(text.replace(' ', 'T') + '+08:00')
-      return Number.isNaN(parsed) ? undefined : parsed
-    })
-    .filter((value) => value !== undefined)
-  if (stamps.length === 0) return undefined
+  const best = earliestExpiryCard(cards)
+  if (best === undefined) return undefined
   const parts = new Intl.DateTimeFormat('en-US', {
     month: '2-digit', day: '2-digit', timeZone: 'Asia/Shanghai',
-  }).formatToParts(new Date(Math.min(...stamps)))
+  }).formatToParts(new Date(best.parsed))
   const part = (type) => parts.find((item) => item.type === type)?.value ?? ''
   return `${part('month')}/${part('day')}`
 }
@@ -994,10 +1003,21 @@ export function mountQuotaCard({
     const row = doc.createElement('div')
     row.className = 'dqw-reset-row'
     const expiry = earliestExpiryLabel(model)
+    const expiryLabel = expiry !== undefined ? copy.resetCards.expiry.replace('{date}', expiry) : '—'
     row.append(text(doc, 'span', 'dqw-reset-kind', type === 'WEEK' ? copy.resetCards.week : copy.resetCards.fiveHour))
     row.append(text(doc, 'span', 'dqw-reset-mid', '·'))
-    row.append(text(doc, 'span', 'dqw-reset-expiry',
-      expiry !== undefined ? copy.resetCards.expiry.replace('{date}', expiry) : '—'))
+    const expiryNode = text(doc, 'span', 'dqw-reset-expiry', expiryLabel)
+    // Keyboard-reachable detail: the full original stamp of the earliest card
+    // plus the Beijing-reading assumption — stated as an assumption, never as
+    // an officially confirmed upstream contract.
+    const earliest = earliestExpiryCard(model)
+    if (earliest !== undefined) {
+      const detail = `${expiryLabel} · ${earliest.card.expireTime} · ${copy.resetCards.expiryAssumed}`
+      expiryNode.tabIndex = 0
+      expiryNode.setAttribute('aria-label', detail)
+      expiryNode.title = detail
+    }
+    row.append(expiryNode)
     const count = model.length
     row.append(text(doc, 'span', `dqw-reset-count${count === 0 ? ' is-empty' : ''}`, count === 0
       ? copy.resetCards.none

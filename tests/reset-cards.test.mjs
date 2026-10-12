@@ -11,6 +11,7 @@ import {
   buildResetUseSpec,
   normalizeResetType,
   parseResetCards,
+  parseResetExpiryTime,
   parseResetUseResult,
   pickResetCard,
   publicResetCards,
@@ -149,6 +150,46 @@ test('pickResetCard defaults to the earliest-expiring card', () => {
   const cards = parseResetCards(200, LIVE_LIST)
   assert.equal(pickResetCard(cards, 'WEEK').card.recordId, 1148642)
   assert.equal(pickResetCard(cards, 'FIVE_HOUR').card.recordId, 1148647)
+})
+
+test('the shared expiry parser reads bare stamps as Beijing and keeps explicit zones', () => {
+  assert.equal(parseResetExpiryTime('2026-11-02 00:30:00'), Date.parse('2026-11-02T00:30:00+08:00'),
+    'a bare wall-clock stamp reads as Beijing time (+08:00)')
+  assert.equal(parseResetExpiryTime('2026-11-01 15:00:00Z'), Date.parse('2026-11-01T15:00:00Z'),
+    'an explicit Z stamp keeps the upstream interpretation')
+  assert.equal(parseResetExpiryTime('2026-11-01 15:00:00+02:00'), Date.parse('2026-11-01T15:00:00+02:00'),
+    'an explicit offset is never double-appended')
+  assert.equal(parseResetExpiryTime('garbage'), undefined)
+  assert.equal(parseResetExpiryTime(''), undefined)
+  assert.equal(parseResetExpiryTime(undefined), undefined)
+})
+
+test('a Z-stamped card that is truly earlier wins over a later Beijing stamp', () => {
+  // '2026-11-02 00:30:00' reads as 2026-11-01T16:30Z; the Z card is 15:00Z —
+  // so the Z card is the real earliest despite its later local date.
+  const cards = {
+    week: [
+      { recordId: 2, expireTime: '2026-11-02 00:30:00' },
+      { recordId: 1, expireTime: '2026-11-01 15:00:00Z' },
+    ],
+    fiveHour: [],
+  }
+  assert.equal(pickResetCard(cards, 'WEEK').card.recordId, 1,
+    'the same instant comparison drives host card picking')
+})
+
+test('an unparseable expiry sorts last instead of blocking the pick', () => {
+  const cards = {
+    week: [
+      { recordId: 3, expireTime: 'not-a-date' },
+      { recordId: 4, expireTime: '2026-11-01 09:00:00' },
+    ],
+    fiveHour: [],
+  }
+  assert.equal(pickResetCard(cards, 'WEEK').card.recordId, 4)
+  // An all-invalid pool still yields a card (they all rank last together).
+  const broken = { week: [{ recordId: 5, expireTime: 'nope' }], fiveHour: [] }
+  assert.equal(pickResetCard(broken, 'WEEK').card.recordId, 5)
 })
 
 test('pickResetCard honours an explicit id and refuses a bad one', () => {

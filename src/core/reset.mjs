@@ -185,13 +185,26 @@ export function pickResetCard(cards, resetType, recordId) {
   return { card: sorted[0] }
 }
 
+/**
+ * Parse a card expiry stamp into a comparable epoch ms (`undefined` when invalid).
+ * A stamp carrying an explicit zone (`Z` or `±hh:mm`) keeps the upstream's own
+ * interpretation; a bare wall-clock stamp is read as Beijing time (+08:00) —
+ * the format observed upstream, though not an officially confirmed contract.
+ * Host card picking AND the client's expiry display must consume this same
+ * function so selection and display can never disagree.
+ */
+export function parseResetExpiryTime(expireTime) {
+  const text = asString(expireTime)
+  if (text === undefined) return undefined
+  const normalized = text.includes('T') ? text : text.replace(' ', 'T')
+  const hasZone = /(?:Z|z|[+-]\d{2}:?\d{2})$/.test(normalized)
+  const parsed = Date.parse(hasZone ? normalized : `${normalized}+08:00`)
+  return Number.isNaN(parsed) ? undefined : parsed
+}
+
 /** Rank a card's expiry for "earliest wins"; an unparseable date sorts last. */
 function expiryRank(expireTime) {
-  const text = asString(expireTime)
-  if (text === undefined) return Number.MAX_SAFE_INTEGER
-  // The upstream stamps are Beijing wall-clock without a zone suffix.
-  const parsed = Date.parse(text.replace(' ', 'T') + '+08:00')
-  return Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed
+  return parseResetExpiryTime(expireTime) ?? Number.MAX_SAFE_INTEGER
 }
 
 /** A compact public view of the available cards, safe to hand to the browser. */

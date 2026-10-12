@@ -1562,6 +1562,27 @@ test('reset rows wrap on narrow widths and keep the spend button focusable', asy
   window.close()
 })
 
+// --- Task 12: one expiry parser drives picking and display --------------------
+
+test('the earliest expiry label, its focusable detail and host picking share one time source', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  const wallet = { status: 'ready', cards: { week: [
+    { recordId: 2, expireTime: '2026-11-02 00:30:00' },
+    { recordId: 1, expireTime: '2026-11-01 15:00:00Z' },
+  ], fiveHour: [] } }
+  const { dispose } = await mounted(window, resetSnapshot(wallet))
+  await openPanelGlm(window)
+  const expiry = floatPanel(window).querySelector('.dqw-reset-expiry')
+  assert.equal(expiry.textContent, '11/01 前有效', 'the visible label shows the truly earlier (Z) card')
+  assert.equal(expiry.getAttribute('tabindex'), '0', 'the full-value detail is keyboard reachable')
+  const accessible = `${expiry.getAttribute('aria-label') ?? ''} ${expiry.title ?? ''}`
+  assert.match(accessible, /2026-11-01 15:00:00Z/, 'the full original stamp is exposed')
+  assert.match(accessible, /北京时间/, 'the Beijing reading is stated as an assumption')
+  assert.doesNotMatch(accessible, /官方已/, 'it never claims official confirmation')
+  dispose()
+  window.close()
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()
