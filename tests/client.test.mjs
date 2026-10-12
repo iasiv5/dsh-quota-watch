@@ -1882,6 +1882,59 @@ test('an unreadable outcome journal shows manual use as unavailable and offers n
   } finally { dispose(); window.close() }
 })
 
+// --- Task 15: one shared 立即刷新 busy state ----------------------------------
+
+test('立即刷新 shares one busy state: single flight, disabled button, no extra toast', async () => {
+  const window = dom({ locale: 'zh-CN' })
+  let releaseForce
+  const gate = new Promise((resolve) => { releaseForce = resolve })
+  let posts = 0
+  let failNext = false
+  const payload = resetSnapshot({ status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } })
+  const fetchImpl = async (path, init = {}) => {
+    const target = String(path)
+    if (target.endsWith('/refresh')) {
+      posts += 1
+      if (failNext) throw new Error('connection lost')
+      await gate
+      return response(payload)
+    }
+    return response(payload)
+  }
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
+  try {
+    await turn()
+    await openPanelGlm(window)
+    const refreshBtn = () => floatPanel(window).querySelector('[data-action="panel-refresh"]')
+    assert.equal(refreshBtn().textContent, '立即刷新')
+
+    refreshBtn().dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    assert.equal(posts, 1)
+    assert.equal(refreshBtn().disabled, true, 'the button disables while the force is in flight')
+    assert.match(refreshBtn().textContent, /刷新中/)
+
+    // A repeat click and the label-refresh affordance both stay inert while busy.
+    refreshBtn().dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    assert.equal(posts, 1, 'a busy refresh ignores repeat clicks')
+
+    releaseForce()
+    for (let hop = 0; hop < 5; hop += 1) await turn()
+    assert.equal(refreshBtn().disabled, false)
+    assert.equal(refreshBtn().textContent, '立即刷新', 'the label recovers after success')
+
+    // A transport failure recovers the label too, and no toast appears.
+    failNext = true
+    refreshBtn().dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    for (let hop = 0; hop < 4; hop += 1) await turn()
+    assert.equal(posts, 2)
+    assert.equal(refreshBtn().disabled, false)
+    assert.equal(refreshBtn().textContent, '立即刷新')
+    assert.equal(floatPanel(window).querySelector('.dqw-toast'), null, 'no extra toast is added')
+  } finally { dispose(); window.close() }
+})
+
 test('Chinese reset and unlimited notes use spaced parentheses and padded dates', async () => {
   const window = dom({ locale: 'zh-CN' })
   const provider = glmProvider()

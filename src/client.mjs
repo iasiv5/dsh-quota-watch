@@ -28,6 +28,7 @@ const COPY = {
       showCard: '显示侧边栏卡片',
       hideCard: '隐藏侧边栏卡片',
       refreshNow: '立即刷新',
+      refreshing: '刷新中',
     },
     backToOverview: '返回额度概览',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
@@ -96,6 +97,7 @@ const COPY = {
       showCard: 'Show sidebar card',
       hideCard: 'Hide sidebar card',
       refreshNow: 'Refresh now',
+      refreshing: 'Refreshing',
     },
     backToOverview: 'Back to quota overview',
     providerNames: { glm: 'GLM', copilot: 'Copilot' },
@@ -833,6 +835,9 @@ export function mountQuotaCard({
   // update the UI.
   let forceBusy = false
   let forceGeneration = 0
+  // The ONE shared 立即刷新 busy state: the detail header button, the overview
+  // action and every refresh click all honor this single flag.
+  let refreshBusy = false
   let forcedResetForOpen = false   // the one-shot poll(true) guard per detail open
   // Cold until the first successful render: a mount whose first poll fails or
   // stalls must behave like the documented no-data state (hidden shell, fast
@@ -917,8 +922,9 @@ export function mountQuotaCard({
       refresh.type = 'button'
       refresh.className = 'dqw-panel-refresh'
       refresh.dataset.action = 'panel-refresh'
-      refresh.textContent = copy.actions.refreshNow
-      refresh.setAttribute('aria-label', copy.actions.refreshNow)
+      refresh.textContent = refreshBusy ? copy.actions.refreshing : copy.actions.refreshNow
+      refresh.setAttribute('aria-label', refresh.textContent)
+      refresh.disabled = refreshBusy
       header.append(refresh)
     }
     const close = doc.createElement('button')
@@ -954,8 +960,9 @@ export function mountQuotaCard({
     refresh.type = 'button'
     refresh.className = 'dqw-panel-action'
     refresh.dataset.action = 'panel-refresh'
-    refresh.textContent = copy.actions.refreshNow
-    refresh.setAttribute('aria-label', copy.actions.refreshNow)
+    refresh.textContent = refreshBusy ? copy.actions.refreshing : copy.actions.refreshNow
+    refresh.setAttribute('aria-label', refresh.textContent)
+    refresh.disabled = refreshBusy
     actions.append(refresh)
     return actions
   }
@@ -1562,10 +1569,15 @@ export function mountQuotaCard({
   const poll = async (force) => {
     if (disposed) return
     if (force === true) {
-      // One force at a time; its response always wins over any ordinary GET.
-      if (forceBusy) return
+      // One refresh at a time; its response always wins over any ordinary GET.
+      if (refreshBusy) return
+      refreshBusy = true
       forceBusy = true
       const generation = ++forceGeneration
+      // Flip the shared busy state before the request: header button, overview
+      // action and label clicks all re-render against it.
+      renderAll()
+      if (openKey !== undefined) syncPop()
       try {
         const next = await fetchJson(fetchImpl, CLIENT_ROUTES.refresh, 'POST')
         if (generation === forceGeneration && !disposed) render(next)
@@ -1573,6 +1585,11 @@ export function mountQuotaCard({
         if (!disposed) showTransportError()
       } finally {
         forceBusy = false
+        refreshBusy = false
+        if (!disposed) {
+          renderAll()
+          if (openKey !== undefined) syncPop()
+        }
       }
       return
     }
@@ -1726,6 +1743,7 @@ export function mountQuotaCard({
   // real row/label in every browser.
   const onBodyClick = (event) => {
     if (event.target?.closest?.('[data-action="refresh"]')) {
+      if (refreshBusy) return
       void poll(true)
       return
     }
