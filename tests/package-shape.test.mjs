@@ -115,3 +115,13 @@ test('Cordis patch and GitHub workflows parse and enforce OIDC publishing', asyn
   assert.ok(publish.jobs.publish.steps.some((step) => typeof step.run === 'string' && step.run.includes('--provenance')))
   assert.equal(publish.jobs.publish.steps.some((step) => step.env?.NODE_AUTH_TOKEN), false)
 })
+
+test('the client declares every service it touches (cordis inject contract; 2026-10-13 boot failure)', async () => {
+  // ctx.slots access without `inject: ['slots']` throws
+  // "cannot get property 'slots' without inject" and kills the whole
+  // activation — the declaration must exist in BOTH the module export and
+  // the package manifest, in lockstep.
+  const { inject } = await import('../src/client.mjs')
+  assert.ok(Array.isArray(inject) && inject.includes('slots'), 'client touches ctx.slots → inject must declare "slots"')
+  assert.deepEqual(packageJson.dsh?.client?.inject, inject, 'package.json dsh.client.inject must mirror the client inject declaration')
+})

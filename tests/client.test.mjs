@@ -2467,3 +2467,46 @@ test('English empty reset section collapses to one row and keeps its separator',
   dispose()
   window.close()
 })
+
+test('shell takeover yields the sidebar card (negative-priority workspaces occupant, 2026-10-13 ds-bot)', async () => {
+  const window = dom()
+  // The sidebar card is opt-in (surface flag defaults to hidden; the capsule
+  // is the default surface) — turn it on like a real user would.
+  window.localStorage.setItem(SURFACE_FLAGS_KEY, JSON.stringify({ cardHidden: false }))
+  // ds-bot takes sidebar.workspaces at -10 for its native bot sidebar; the
+  // official tree (ui-workspace) sits at default priority 0. A NEGATIVE
+  // occupant means the foot is a takeover shell's native surface and the
+  // injected card yields it entirely (same contract as skins/dsh-m rows).
+  let occupants = [{ options: { name: 'sidebar.workspaces', priority: -10 } }]
+  const listeners = new Set()
+  const slots = {
+    entries: (key) => (key === 'sidebar.workspaces' ? occupants : []),
+    subscribe: (key, fn) => {
+      listeners.add(fn)
+      return () => listeners.delete(fn)
+    },
+  }
+  const fetchImpl = async () => response(snapshot([glmProvider(), copilotProvider()]))
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000, slots })
+  await turn()
+  const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+  assert.ok(container)
+  assert.equal(container.hidden, true, 'takeover shell live → the injected card yields the whole foot')
+  assert.equal(container.shadowRoot.querySelector('.dqw-card').style.display, 'none')
+
+  // Official-only ledger (ds-bot unloaded): the sentinel flips and the card returns.
+  occupants = [{ options: { name: 'sidebar.workspaces', priority: 0 } }]
+  for (const notify of [...listeners]) notify()
+  assert.equal(container.hidden, false, 'official 0-priority tree → the card stays')
+
+  // A racing latecomer occupying the seat again hides it without any reload —
+  // order-symmetric: ds-bot may boot before or after quota-watch.
+  occupants = [
+    { options: { name: 'sidebar.workspaces', priority: 0 } },
+    { options: { name: 'sidebar.workspaces', priority: -10 } },
+  ]
+  for (const notify of [...listeners]) notify()
+  assert.equal(container.hidden, true, 'takeover flip is live in both directions')
+  dispose()
+  window.close()
+})

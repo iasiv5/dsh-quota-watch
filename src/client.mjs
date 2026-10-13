@@ -5,7 +5,12 @@ import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosit
 import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 
 export const name = 'quota-watch-client'
-export const inject = []
+// 2026-10-13: the shell-takeover sentinel reads the OFFICIAL slots ledger, so
+// the client now touches ctx.slots — cordis denies undeclared service access
+// ("cannot get property 'slots' without inject") and the whole activation
+// dies. Declare BEFORE using; the bundle + package.json dsh.client.inject
+// must stay in lockstep (locked by tests/package-shape.test.mjs).
+export const inject = ['slots']
 
 const CARD_SELECTOR = '[data-dsh-quota-watch-card]'
 const FLOAT_SELECTOR = '[data-dsh-quota-watch-float]'
@@ -556,6 +561,9 @@ export function mountQuotaCard({
   // Q16: a confirmed SUCCESS notice lingers about five seconds before the
   // panel returns to the latest inventory. Injectable for tests.
   outcomeNoticeMs = 5_000,
+  // Shell-takeover sentinel (2026-10-13 ds-bot): inject `ctx.slots` to arm it.
+  // Injectable so DOM tests and exotic hosts keep the legacy behavior.
+  slots = null,
 } = {}) {
   if (!doc?.body || typeof fetchImpl !== 'function') return () => {}
   if (doc.querySelector(CARD_SELECTOR) || doc.querySelector(FLOAT_SELECTOR)) return () => {}
@@ -1552,6 +1560,23 @@ export function mountQuotaCard({
   let currentFoot = null
   let footTooNarrow = false
   let noDataHidden = false
+  // The sidebar foot belongs to whoever registers sidebar.workspaces
+  // (ui-sidebar doc: "the foot is the sidebar.workspaces registrant's"). The
+  // official workspace tree registers at default priority 0 (ui-workspace); a
+  // NEGATIVE-priority occupant is a takeover shell (ds-bot takes the seat at
+  // -10 for its native bot sidebar) — while one is live the injected card
+  // yields the whole foot, same contract as the dsh-skins/dsh-m footer rows.
+  // The signal is the OFFICIAL slot ledger, not any ds-bot internal.
+  let shellTakeover = false
+  const syncShellTakeover = () => {
+    try {
+      shellTakeover = (slots?.entries?.('sidebar.workspaces') ?? []).some(
+        (entry) => (entry.options.priority ?? 0) < 0,
+      )
+    } catch {
+      shellTakeover = false
+    }
+  }
   const syncFootNarrowness = () => {
     footTooNarrow = currentFoot !== null && currentFoot.clientWidth > 0 && currentFoot.clientWidth < CARD_MIN_WIDTH
   }
@@ -1564,7 +1589,7 @@ export function mountQuotaCard({
     // The sidebar card shows ONLY in an expanded sidebar: the width guard hides
     // it in narrow rails / squeezed containers (works on every profile), and no
     // host collapse signal is consulted at all (they proved host-specific).
-    const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden
+    const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden && !shellTakeover
     container.hidden = !showCard
     card.style.display = showCard ? '' : 'none'
   }
@@ -1696,6 +1721,21 @@ export function mountQuotaCard({
     ? new win.MutationObserver(() => { if (!disposed) renderAll() })
     : null
   langObserver?.observe(doc.documentElement, { attributeFilter: ['lang'] })
+  // Arm the shell-takeover sentinel: re-probe on every workspaces-ledger
+  // mutation (microtask-batched by the slot core) and once up front. Without
+  // an injected slots service (DOM tests, exotic hosts) this is a no-op and
+  // the card behaves exactly as before.
+  let offShellTakeover = null
+  try {
+    if (slots && typeof slots.subscribe === 'function') {
+      offShellTakeover = slots.subscribe('sidebar.workspaces', () => {
+        if (disposed) return
+        syncShellTakeover()
+        syncCardVisibility()
+      })
+    }
+  } catch {}
+  syncShellTakeover()
   // Cold until data lands: keep the shell hidden so a slow or failed first
   // probe never flashes an empty capsule (startPolling arms the retry chain).
   syncFloatVisibility()
@@ -1870,6 +1910,7 @@ export function mountQuotaCard({
     outcomeNoticeTimer = undefined
     observer.disconnect()
     langObserver?.disconnect()
+    if (offShellTakeover) offShellTakeover()
     doc.removeEventListener('visibilitychange', onVisibilityChange)
     doc.removeEventListener('pointerdown', onDocPointerDown, true)
     doc.removeEventListener('scroll', onDocScroll, true)
@@ -1890,5 +1931,5 @@ export function mountQuotaCard({
 }
 
 export function apply(ctx) {
-  ctx.effect(() => mountQuotaCard(), 'dsh-quota-watch: sidebar')
+  ctx.effect(() => mountQuotaCard({ slots: ctx.slots ?? null }), 'dsh-quota-watch: sidebar')
 }
