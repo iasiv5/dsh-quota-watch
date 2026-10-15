@@ -897,3 +897,138 @@ test('a failed legacy-settings write reports rollback risk without blocking the 
     t.mock.timers.reset()
   }
 })
+
+// --- Idle polling pause --------------------------------------------------------
+
+test('scheduled rounds skip every probe once no client has been seen for two intervals', async () => {
+  let clock = 1_800_000_000_000
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  try {
+    service.noteClientSeen()
+    await service.refresh()
+    assert.equal(fetchImpl.calls.length, 4, 'plan, usage, Copilot and the initial card list')
+    clock += 60_000
+    await service.refresh()
+    assert.equal(fetchImpl.calls.length, 7, 'one interval past the stamp is still not idle (card list gated)')
+    clock += 60_000
+    const skipped = await service.refresh()
+    assert.equal(fetchImpl.calls.length, 7, 'an idle round probes nothing upstream')
+    assert.equal(skipped.providers.length, 2, 'an idle round still serves the cached view')
+  } finally { service.stop() }
+})
+
+test('the first client request after a pause resumes with stale-while-revalidate', async () => {
+  let clock = 1_800_000_000_000
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  try {
+    service.noteClientSeen()
+    await service.refresh()
+    const before = service.overview().updatedAt
+    clock += 120_000
+    await service.refresh() // engages the pause
+    clock += 3_600_000 // a long night passes
+    assert.equal(service.overview().updatedAt, before, 'the cached observation survives the pause unchanged')
+    const kick = service.noteClientSeen()
+    assert.notEqual(kick, undefined, 'a stale snapshot kicks a background round')
+    await kick
+    assert.ok(service.overview().updatedAt > before, 'the kicked round refreshes the snapshot')
+    assert.equal(fetchImpl.calls.length, 8, 'plan, usage, Copilot and a no-longer-gated card list ran again')
+    assert.equal(service.noteClientSeen(), undefined, 'fresh data does not kick another round')
+    assert.equal(fetchImpl.calls.length, 8)
+  } finally { service.stop() }
+})
+
+test('a forced refresh ignores the idle pause', async () => {
+  let clock = 1_800_000_000_000
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  try {
+    service.noteClientSeen()
+    await service.refresh()
+    clock += 120_000
+    await service.refresh(true) // the manual 立即刷新 path
+    assert.equal(fetchImpl.calls.length, 8, 'the forced round probes and re-lists cards despite the pause')
+  } finally { service.stop() }
+})
+
+test('boot counts as watched: start() always runs the initial round', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl })
+  const flush = async () => {
+    for (let hop = 0; hop < 8; hop += 1) await new Promise((resolve) => setImmediate(resolve))
+  }
+  try {
+    service.start()
+    t.mock.timers.tick(0)
+    await flush()
+    assert.equal(fetchImpl.calls.length, 4, 'the initial round probes without any client request')
+  } finally {
+    service.stop()
+    t.mock.timers.reset()
+  }
+})
+
+test('idle pause and resume log exactly one line per transition', async () => {
+  let clock = 1_800_000_000_000
+  const logs = { info: [], warn: [] }
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), {
+    logMirror: { info: (line) => logs.info.push(line), warn: (line) => logs.warn.push(line) },
+    fetchImpl,
+    now: () => clock,
+  })
+  try {
+    service.noteClientSeen()
+    await service.refresh()
+    clock += 120_000
+    await service.refresh()
+    await service.refresh()
+    assert.equal(logs.info.filter((line) => line.includes('poll paused')).length, 1, 'one pause line per entry')
+    service.noteClientSeen()
+    clock += 120_000
+    await service.refresh()
+    assert.equal(logs.info.filter((line) => line.includes('poll resumed')).length, 1)
+    assert.equal(logs.info.filter((line) => line.includes('poll paused')).length, 2)
+  } finally { service.stop() }
+})
+
+test('manual card listing still answers while idle — the pause gates only scheduled rounds', async () => {
+  let clock = 1_800_000_000_000
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  try {
+    service.noteClientSeen()
+    await service.refresh()
+    clock += 120_000
+    await service.refresh() // engages the pause
+    const listed = await service.listResetCards()
+    assert.equal(listed.ok, true)
+    assert.equal(
+      fetchImpl.calls.filter((call) => call.url.includes('/customer-package-reset/list')).length,
+      2,
+      'an explicit list re-reads upstream regardless of the pause',
+    )
+  } finally { service.stop() }
+})
+
+test('the overview route stamps the watcher and answers from cache without waiting', async () => {
+  let clock = 1_800_000_000_000
+  const fetchImpl = recordingFetch()
+  const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, now: () => clock })
+  try {
+    service.noteClientSeen()
+    await service.refresh()
+    clock += 3_600_000
+    await service.refresh() // engages the pause
+    const route = makeOverviewRoute({ remoteWebUiPairing: { isPairedDevice: () => true } }, service)
+    const res = fakeResponse()
+    await route.handler(pairedRequest({ method: 'GET' }), res)
+    assert.equal(res.statusCode, 200)
+    assert.equal(JSON.parse(res.body).providers.length, 2, 'answered synchronously from the cached view')
+    for (let hop = 0; hop < 8; hop += 1) await new Promise((resolve) => setImmediate(resolve))
+    assert.equal(service.noteClientSeen(), undefined, 'the kicked round has already refreshed the snapshot')
+  } finally { service.stop() }
+})

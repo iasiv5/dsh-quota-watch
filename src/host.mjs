@@ -17,6 +17,7 @@ import { retireLegacyAutoResetSettings } from './core/legacy-auto-settings.mjs'
 import { createManualOutcomeJournal } from './core/manual-outcome.mjs'
 import {
   DEFAULT_POLL_INTERVAL_SEC,
+  IDLE_AFTER_POLL_INTERVALS,
   MAX_POLL_INTERVAL_SEC,
   MIN_POLL_INTERVAL_SEC,
   PROBE_TIMEOUT_MS,
@@ -128,6 +129,15 @@ function requestAllowed(ctx, req, res) {
   return false
 }
 
+/** The access fence plus the idle-pause watcher stamp: any allowed request
+ * proves a browser is watching, so it feeds lastClientSeenAt. The call is
+ * defensive because route tests may pass minimal service doubles. */
+function requestAllowedAndSeen(ctx, req, res, service) {
+  if (!requestAllowed(ctx, req, res)) return false
+  service?.noteClientSeen?.()
+  return true
+}
+
 /**
  * Where the legacy automatic-use switches persisted. The start()-time one-shot
  * retirement keeps this file overwritten all-off, so a rollback to an old
@@ -170,6 +180,20 @@ export function createQuotaService(ctx, options = {}) {
   let disposed = false
   let coldAttempts = 0
   let legacyRetirement
+
+  // --- Idle polling pause -----------------------------------------------------
+  // The scheduled poll serves browsers only. Once idleAfterMs passes with no
+  // request to any plugin route (every allowed route hit stamps
+  // lastClientSeenAt), timer fires skip the round entirely; the next client
+  // request resumes with a stale-while-revalidate kick. start() stamps once so
+  // the boot round always runs (the first client GET then meets data, not
+  // 'loading'). An undefined stamp (service built but never started, as in
+  // tests) never counts as idle, so direct refresh() calls behave as before.
+  const idleAfterMs = options.idleAfterMs ?? pollIntervalSec * 1000 * IDLE_AFTER_POLL_INTERVALS
+  let lastClientSeenAt
+  let idleActive = false
+  const idleNow = () => lastClientSeenAt !== undefined && now() - lastClientSeenAt >= idleAfterMs
+  const snapshotStale = () => updatedAt === undefined || now() - updatedAt >= pollIntervalSec * 1000
 
   /** The usage slice a browser may see: old values survive only while the failure episode is short. */
   function usageView(usage) {
@@ -444,6 +468,17 @@ export function createQuotaService(ctx, options = {}) {
   // --- Reset cards -----------------------------------------------------------
 
   function refresh(forceCards = false) {
+    // Idle pause: a timer-driven round with no recent client serves the cache
+    // and skips every upstream probe. A forced refresh is exempt, and any
+    // client-driven path has just stamped lastClientSeenAt, so it never lands
+    // here (one check covers both callers).
+    if (forceCards !== true && idleNow()) {
+      if (!idleActive) {
+        idleActive = true
+        logAuto('info', `quota-watch: idle — no client request for ${Math.round(idleAfterMs / 1000)}s, scheduled poll paused`)
+      }
+      return Promise.resolve(view())
+    }
     if (pollPromise !== undefined) {
       // A manual refresh must still re-list cards when it overlaps a scheduled
       // round whose ten-minute gate skipped the list.
@@ -796,6 +831,19 @@ export function createQuotaService(ctx, options = {}) {
     }
   }
 
+  /** Any allowed route hit: stamp the watcher clock, and — if the snapshot
+   * went stale during a pause — kick a background round. Stale-while-
+   * revalidate: the caller serves the cached view immediately and never waits
+   * for the kick. Returns the kicked round's promise for tests. */
+  function noteClientSeen() {
+    const resuming = idleActive
+    lastClientSeenAt = now()
+    idleActive = false
+    if (resuming) logAuto('info', 'quota-watch: client request — scheduled poll resumed')
+    if (disposed || pollPromise !== undefined || !snapshotStale()) return undefined
+    return refresh()
+  }
+
   function schedule(delayMs) {
     if (disposed) return
     timer = setTimeout(async () => {
@@ -825,6 +873,7 @@ export function createQuotaService(ctx, options = {}) {
   return {
     overview: view,
     refresh,
+    noteClientSeen,
     listResetCards,
     useResetCard,
     acknowledgeManualOutcome,
@@ -842,6 +891,9 @@ export function createQuotaService(ctx, options = {}) {
       } else {
         logAuto('warn', `quota-watch: could not overwrite the legacy auto-reset settings (${legacyRetirement.error}); a rollback to an old version could revive its switches, but this host has no automatic spending path`)
       }
+      // Boot counts as watched for the first idle window: the initial round
+      // always runs, so the first client GET meets data instead of 'loading'.
+      lastClientSeenAt = now()
       // Routes register synchronously in apply() before start(), so probing
       // immediately is safe; the legacy 2s delay only padded the cold start.
       schedule(0)
@@ -861,7 +913,7 @@ export function makeOverviewRoute(ctx, service) {
     kind: 'exact',
     path: ROUTES.overview,
     handler: (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'GET')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'GET')) return
       responseJson(res, 200, service.overview())
     },
   }
@@ -872,7 +924,7 @@ export function makeRefreshRoute(ctx, service) {
     kind: 'exact',
     path: ROUTES.refresh,
     handler: async (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'POST')) return
       try {
         await service.refresh(true)
         responseJson(res, 200, service.overview())
@@ -889,7 +941,7 @@ export function makeResetCardsRoute(ctx, service) {
     kind: 'exact',
     path: ROUTES.resetCards,
     handler: async (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'GET')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'GET')) return
       try {
         const result = await service.listResetCards()
         responseJson(res, result.ok ? 200 : 502, result)
@@ -912,7 +964,7 @@ export function makeResetUseRoute(ctx, service) {
     kind: 'exact',
     path: ROUTES.resetUse,
     handler: async (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'POST')) return
       const payload = await readJsonBody(req)
       if (payload === undefined) {
         responseJson(res, 400, { ok: false, error: 'invalid-body', message: '请求体不是合法 JSON' })
@@ -948,7 +1000,7 @@ export function makeResetAcknowledgeRoute(ctx, service) {
     kind: 'exact',
     path: ROUTES.resetAcknowledge,
     handler: async (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'POST')) return
       const payload = await readJsonBody(req)
       if (payload === undefined) {
         responseJson(res, 400, { ok: false, error: 'invalid-body', message: '请求体不是合法 JSON' })
@@ -975,7 +1027,7 @@ export function makeResetReceiptRoute(ctx, service) {
     kind: 'exact',
     path: ROUTES.resetReceipt,
     handler: async (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'POST')) return
       const payload = await readJsonBody(req)
       if (payload === undefined) {
         responseJson(res, 400, { ok: false, error: 'invalid-body', message: '请求体不是合法 JSON' })
@@ -1000,12 +1052,12 @@ const RETIRED_AUTO_RESET_PATH = '/api/dsh-quota-watch/auto-reset'
  * The path is a private host constant precisely so it never re-enters the
  * shared client contract in src/shared.mjs.
  */
-export function makeRetiredAutoResetRoute(ctx) {
+export function makeRetiredAutoResetRoute(ctx, service) {
   return {
     kind: 'exact',
     path: RETIRED_AUTO_RESET_PATH,
     handler: async (req, res) => {
-      if (!requestAllowed(ctx, req, res) || !methodAllowed(req, res, 'POST')) return
+      if (!requestAllowedAndSeen(ctx, req, res, service) || !methodAllowed(req, res, 'POST')) return
       responseJson(res, 410, { ok: false, error: 'retired', message: '自动用卡功能已退役；重置卡请在面板手动确认使用' })
     },
   }
@@ -1039,7 +1091,7 @@ export function apply(ctx, config = {}) {
     ctx.webServer.register(makeResetUseRoute(ctx, service)),
     ctx.webServer.register(makeResetAcknowledgeRoute(ctx, service)),
     ctx.webServer.register(makeResetReceiptRoute(ctx, service)),
-    ctx.webServer.register(makeRetiredAutoResetRoute(ctx)),
+    ctx.webServer.register(makeRetiredAutoResetRoute(ctx, service)),
   ]
   service.start()
   ctx.effect(() => () => {

@@ -31,3 +31,7 @@ export const MIN_POLL_INTERVAL_SEC = 30
 export const MAX_POLL_INTERVAL_SEC = 3600
 export const PROBE_TIMEOUT_MS = 10_000
 export const CLIENT_POLL_INTERVAL_MS = 30_000
+// Idle polling pause: a scheduled round is skipped once this many poll
+// intervals have passed without any request to a plugin route (every allowed
+// route hit stamps the watcher clock).
+export const IDLE_AFTER_POLL_INTERVALS = 2

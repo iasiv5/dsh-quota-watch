@@ -16,6 +16,9 @@ _Avoid_: Real-time usage (when implying per-request precision)
 **Stale provider observation**: A previously successful quota or usage reading retained after a subsequent attempt to refresh that same reading failed. Showing the last successful reading between scheduled polls is ordinary caching, not this failure state.
 _Avoid_: Cached reading (as a synonym for stale), live data
 
+**Idle polling pause**: The host-side suspension of scheduled quota probes after a quiet period with no request to any plugin route (default: two poll intervals). The first client request resumes probing immediately: it is answered from the last cached quota observation while a fresh round runs in the background. A pause is not a failed refresh and never marks an observation stale.
+_Avoid_: Sleep mode, offline mode, background refresh (implies probing continues)
+
 **GitHub AI Credits**: GitHub's current Copilot usage-billing unit, distinct from the legacy Premium Requests allowance. Credits are accounted for by the relevant billing entity; an organization-managed seat does not by itself create an individually reserved balance.
 _Avoid_: Premium requests (as a synonym for AI Credits), seat balance (unless separately defined)
 
