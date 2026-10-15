@@ -1,0 +1,15 @@
+# Pause scheduled quota polling while no client is watching
+
+> Status: Accepted, shipped in v0.1.30 and installed on the running web profile (2026-10-15). The browser-facing vocabulary lives in GLOSSARY.md ("Idle polling pause"); the user-facing note lives in the README's 配置 section. The freshness semantics of "Quota observation" and "Stale provider observation" are unchanged by this decision.
+
+The scheduled poll exists to serve browsers, but the 60-second timer re-armed itself forever: with every tab closed (overnight, desktop app quit) the host kept issuing ~3 upstream probes per minute plus a card list every ten minutes — roughly 4,300 provider requests a day answering nobody. We accept pausing the scheduled poll rather than merely slowing it:
+
+1. **Watcher clock.** Every allowed request to any plugin route (including the 410 tombstone for retired clients) stamps `lastClientSeenAt` behind the access fence — one stamping path, no per-route policy. Once `IDLE_AFTER_POLL_INTERVALS` (2) poll intervals pass with no stamp, a timer-driven `refresh()` serves the cached view and skips every upstream probe.
+
+2. **Resume is stale-while-revalidate.** The first client request answers immediately from the cached view and kicks a background round when the snapshot is older than one interval (or was never probed); an in-flight round is piggybacked and fresh data kicks nothing. A forced refresh (立即刷新) is exempt from the pause, and manual card flows bypass it by design — listing, spending and acknowledgement probe upstream directly.
+
+3. **Boot always runs the first round.** `start()` stamps the clock once, so the first client GET after a host start meets data instead of `loading` — the alternative is an invisible capsule for up to one client poll — at the cost of ~4 upstream requests per host start.
+
+A pause is not a failed refresh: provider statuses and the stale semantics are untouched. A paused host shows the last successful observation with its original status, and the first request refreshes it within one client poll (~30s). Pause entry and resume each log one deduped info line through the dual channel (cordis ring buffer + journald mirror), so the behavior is observable in service logs.
+
+We choose a fire-time skip over tearing the timer down when idle (re-arming on request adds race paths for no gain — an unref'd timer waking once a minute costs nothing), over adaptive backoff toward `MAX_POLL_INTERVAL_SEC` (the most state for the least reduction: still ~24 idle requests a day), and over a blocking revalidate on resume (`PROBE_TIMEOUT_MS` of white-screen waiting for numbers that move slowly). We also decline to mark paused observations stale in the view — that would contradict the stale definition and grow the browser contract for a case the 30-second poll already heals — and to add a separate retry backoff for persistently failing probes while a tab stays open: client-driven revalidation is already bounded below by `MIN_POLL_INTERVAL_SEC`, the same order as the previous forever-60-second behavior.
