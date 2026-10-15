@@ -131,6 +131,110 @@ test('summary rows replace the expanded card and keep refresh and self-healing',
   window.close()
 })
 
+test('steady-state app mutations cost zero seat-discovery scans; displacement still heals', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const document = window.document
+  // Every place() discovery opens with doc.querySelector('[class*="sidebarCol"]');
+  // count those full-document scans while the seat is stable.
+  const realQuerySelector = document.querySelector.bind(document)
+  let docScans = 0
+  document.querySelector = (selector) => {
+    if (selector.includes('sidebarCol')) docScans += 1
+    return realQuerySelector(selector)
+  }
+  // Streaming-style chatter: small nodes appended deep inside the app frame.
+  const frame = document.querySelector('.frame')
+  for (let i = 0; i < 30; i += 1) {
+    frame.append(document.createElement('p'))
+    await turn()
+  }
+  assert.equal(docScans, 0, 'seated steady state never rescans the document')
+
+  // A real displacement inside the live foot fails the seat check and heals.
+  const foot = document.querySelector('.footArea')
+  const container = document.querySelector('[data-dsh-quota-watch-card]')
+  foot.append(container)
+  await turn()
+  assert.ok(docScans > 0, 'a displacement triggers discovery')
+  assert.equal(foot.firstElementChild, container, 'displaced card re-claims the first slot')
+  dispose()
+  window.close()
+})
+
+test('a footless page skips discovery entirely until a sidebar appears', async () => {
+  const window = dom({ footless: true })
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const document = window.document
+  assert.equal(document.querySelector('[data-dsh-quota-watch-card]'), null, 'no card without footArea')
+  const realQuerySelector = document.querySelector.bind(document)
+  let docScans = 0
+  document.querySelector = (selector) => {
+    if (selector.includes('sidebarCol')) docScans += 1
+    return realQuerySelector(selector)
+  }
+  const frame = document.querySelector('.frame')
+  for (let i = 0; i < 20; i += 1) {
+    frame.append(document.createElement('p'))
+    await turn()
+  }
+  assert.equal(docScans, 0, 'footless steady state never rescans the document')
+
+  // A sidebar appearing IS a seat-introducing batch: discovery runs at once.
+  const sidebar = document.createElement('div')
+  sidebar.className = 'sidebarCol'
+  sidebar.innerHTML = '<div class="footArea"></div>'
+  frame.append(sidebar)
+  await turn()
+  assert.ok(docScans > 0, 'a seat-introducing batch triggers discovery')
+  const foot = document.querySelector('.footArea')
+  const container = document.querySelector('[data-dsh-quota-watch-card]')
+  assert.ok(container, 'card mounts when the sidebar appears')
+  assert.equal(foot.firstElementChild, container, 'card claims the first slot of the new foot')
+  dispose()
+  window.close()
+})
+
+test('sidebar teardown and rebuild re-seats the card in the new foot', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const document = window.document
+  const oldFoot = document.querySelector('.footArea')
+  const container = document.querySelector('[data-dsh-quota-watch-card]')
+  assert.equal(oldFoot.firstElementChild, container)
+
+  document.querySelector('.sidebarCol').remove()
+  await turn()
+  const fresh = document.createElement('div')
+  fresh.className = 'sidebarCol'
+  fresh.innerHTML = '<div class="footArea"><div class="settingsArea"></div></div>'
+  document.querySelector('.frame').append(fresh)
+  await turn()
+  const newFoot = document.querySelector('.footArea')
+  assert.notEqual(newFoot, oldFoot)
+  assert.equal(newFoot.firstElementChild, container, 'card re-seats as the first child of the rebuilt foot')
+  dispose()
+  window.close()
+})
+
+test('a new earlier sidebar wins the seat even while the old foot stays connected', async () => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  const document = window.document
+  const frame = document.querySelector('.frame')
+  const container = document.querySelector('[data-dsh-quota-watch-card]')
+  const earlier = document.createElement('div')
+  earlier.className = 'sidebarCol'
+  earlier.innerHTML = '<div class="footArea"></div>'
+  frame.insertBefore(earlier, frame.firstChild)
+  await turn()
+  const feet = document.querySelectorAll('.footArea')
+  assert.equal(feet.length, 2)
+  assert.equal(feet[0].firstElementChild, container, 'card migrates to the doc-order-first foot')
+  dispose()
+  window.close()
+})
+
 test('provider-derived text is written via textContent, never markup', async () => {
   const window = dom()
   const hostile = glmProvider()

@@ -1710,7 +1710,42 @@ export function mountQuotaCard({
     })
   }
 
-  const observer = new win.MutationObserver(() => {
+  // Seat-gate (2026-10-15 perf): the body observer sees EVERY childList batch
+  // in the whole app — during chat streaming that is a near-continuous stream —
+  // and each scheduled place() used to open with an O(document) discovery scan
+  // (`[class*="sidebarCol"]` cannot use a class index). The gate skips the
+  // schedule entirely when this batch cannot change the seating:
+  //   • Seat valid (card still first child of a connected foot): only a batch
+  //     carrying a sidebarCol/footArea node — added OR removed, the element
+  //     itself or anywhere inside it — can change WHICH foot is the doc-order
+  //     first one or create a competing one. No such node ⇒ place() would be a
+  //     measured no-op.
+  //   • No live foot (null, or stale after the sidebar was torn down): a seat
+  //     can only appear through a sidebar-introducing node, and class-only
+  //     flips were already invisible to this childList-only observer.
+  // A displacement inside a live foot fails seatValid() and re-arms place().
+  // Invariant for the ResizeObserver rebind in place(): any batch that could
+  // change which element IS the foot necessarily carries a marker node, so the
+  // gate never masks a real foot swap (jsdom has no ResizeObserver; this
+  // invariant is argued here, not exercised by tests). Marker-carrying batches
+  // that change nothing still pay one discovery scan — the false-positive cost.
+  const SEAT_MARKERS = ['sidebarCol', 'footArea']
+  const seatValid = () => currentFoot !== null && currentFoot.isConnected
+    && container.parentElement === currentFoot
+    && currentFoot.firstElementChild === container
+  const nodeTouchesSeatDiscovery = (node) => {
+    if (node?.nodeType !== 1) return false
+    const cls = node.getAttribute('class') ?? ''
+    if (SEAT_MARKERS.some((marker) => cls.includes(marker))) return true
+    return node.querySelector('[class*="sidebarCol"], [class*="footArea"]') != null
+  }
+  const batchTouchesSeatDiscovery = (records) => records.some((record) => {
+    const touched = [...(record.addedNodes ?? []), ...(record.removedNodes ?? [])]
+    return touched.some(nodeTouchesSeatDiscovery)
+  })
+  const observer = new win.MutationObserver((records) => {
+    const noLiveFoot = currentFoot === null || !currentFoot.isConnected
+    if (!batchTouchesSeatDiscovery(records) && (seatValid() || noLiveFoot)) return
     schedulePlace()
   })
   observer.observe(doc.body, { childList: true, subtree: true })
