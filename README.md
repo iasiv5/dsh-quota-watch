@@ -23,7 +23,7 @@
 
 | 项目 | 要求或声明 |
 |---|---|
-| DSH | `>=0.1.7-rc.2`（包元数据声明的最低版本） |
+| DSH | `>=0.2.0-rc.1`（包元数据声明的最低版本）；`0.2.1-rc.2` 已完成静态源码适配审计（`docs/reports/2026-10-17-dsh-0.2.1-rc.2-compat-audit.md`），运行时验证随宿主升级跟进 |
 | Node.js | `>=20` |
 | Cordis | peer dependency `^4.0.2` |
 | 客户端平台 | 包元数据声明 `web` |
@@ -86,7 +86,7 @@ Web 与 Desktop profile 均已实测适配。按 DSH 插件管理器提示完成
 
 ## English summary
 
-DSH Quota Watch displays provider-reported quota snapshots for GLM Coding Plan and GitHub Copilot in a floating capsule, detail panel, and optional sidebar card that is hidden by default and toggled from the panel. It does not read DSH session tokens or derive Copilot remaining credits from credits used. The declared requirements are DSH `>=0.1.7-rc.2`, Node.js `>=20`, and Cordis peer `^4.0.2`; the package declares a Web client target. The plugin has been manually verified with both DSH Web and Desktop profiles; CI does not run host-profile integration tests.
+DSH Quota Watch displays provider-reported quota snapshots for GLM Coding Plan and GitHub Copilot in a floating capsule, detail panel, and optional sidebar card that is hidden by default and toggled from the panel. It does not read DSH session tokens or derive Copilot remaining credits from credits used. The declared requirements are DSH `>=0.2.0-rc.1`, Node.js `>=20`, and Cordis peer `^4.0.2`; the package declares a Web client target. Compatibility with DSH `0.2.1-rc.2` has been reviewed by a static source audit (`docs/reports/2026-10-17-dsh-0.2.1-rc.2-compat-audit.md`); runtime verification follows host upgrades. The plugin has been manually verified with both DSH Web and Desktop profiles; CI does not run host-profile integration tests.
 
 Install for a DSH Web or Desktop profile from the DSH plugin marketplace. Both profiles have been manually verified; the CLI install commands are shown above.
 

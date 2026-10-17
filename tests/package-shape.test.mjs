@@ -13,7 +13,7 @@ test('package metadata identifies the approved DSH plugin and release target', (
   assert.equal(packageJson.name, '@iasiv5/dsh-quota-watch')
   assert.match(packageJson.version, /^\d+\.\d+\.\d+$/)
   assert.equal(packageJson.repository.url, 'https://github.com/iasiv5/dsh-quota-watch')
-  assert.equal(packageJson.dsh.engines.dsh, '>=0.1.7-rc.2')
+  assert.equal(packageJson.dsh.engines.dsh, '>=0.2.0-rc.1')
   assert.equal(packageJson.dsh.bundle.patch, './cordis.patch.yml')
   assert.equal(packageJson.dsh.client.platform, 'web')
 })
