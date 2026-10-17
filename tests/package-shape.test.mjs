@@ -25,6 +25,15 @@ test('public lockfile resolves dependencies over HTTPS npmjs URLs', async () => 
   for (const url of resolved) assert.match(url, /^https:\/\/registry\.npmjs\.org\//)
 })
 
+test('lockfile root version stays in sync with package.json', async () => {
+  // 2026-10-18 retro: the root version fields drifted to 0.1.27 across three
+  // shipped releases (0.1.28–0.1.30) before anyone noticed — same failure
+  // mode dsh-m fixed in its release discipline (know-how 031). Pin both.
+  const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'))
+  assert.equal(lock.version, packageJson.version)
+  assert.equal(lock.packages[''].version, packageJson.version)
+})
+
 test('bundle patch mounts exactly the quota-watch host row', async () => {
   const patch = await readFile(resolve(root, 'cordis.patch.yml'), 'utf8')
   assert.match(patch, /id:\s*quota-watch\b/)
