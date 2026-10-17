@@ -1,6 +1,5 @@
 # DSH Quota Watch
 
-[![Release](https://img.shields.io/github/v/release/iasiv5/dsh-quota-watch?label=Release&sort=semver)](https://github.com/iasiv5/dsh-quota-watch/releases)
 [![CI](https://img.shields.io/github/actions/workflow/status/iasiv5/dsh-quota-watch/ci.yml?branch=main&label=CI)](https://github.com/iasiv5/dsh-quota-watch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@iasiv5/dsh-quota-watch?label=npm)](https://www.npmjs.com/package/@iasiv5/dsh-quota-watch)
 [![License](https://img.shields.io/github/license/iasiv5/dsh-quota-watch?label=License)](./LICENSE)
