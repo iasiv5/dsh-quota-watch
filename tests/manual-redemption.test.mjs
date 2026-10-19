@@ -282,7 +282,9 @@ function getRequest(origin = 'https://dsh.example') {
 }
 
 function routeCtx() {
-  return { remoteWebUiPairing: { isPairedDevice: () => true } }
+  // ctx.get form — bare property access is not valid cordis Local semantics
+  // for a non-injected service; see pairedCtx note in host.test.mjs.
+  return { get: (name) => (name === 'remoteWebUiPairing' ? { isPairedDevice: () => true } : undefined) }
 }
 
 async function invoke(route, req) {

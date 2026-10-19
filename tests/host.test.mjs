@@ -29,6 +29,14 @@ function providerBody(url) {
   return copilotBody
 }
 
+// Pairing fixtures mirror the sanctioned host contract: services resolve via
+// ctx.get (non-throwing). A bare ctx.remoteWebUiPairing property read is not
+// valid cordis Local semantics for a non-injected service (it throws), and the
+// plugin no longer falls back to it (src/access.mjs).
+function pairedCtx(isPaired = () => true) {
+  return { get: (name) => (name === 'remoteWebUiPairing' ? { isPairedDevice: isPaired } : undefined) }
+}
+
 function makeContext({ glmKey = 'synthetic-glm-key', githubOAuth = 'synthetic-github-oauth', logger } = {}) {
   return {
     settings: {
@@ -309,7 +317,7 @@ function postJsonRequest(base, body) {
 }
 
 test('overview route requires paired access and returns no-store JSON', () => {
-  const ctx = { remoteWebUiPairing: { isPairedDevice: (request) => request.headers.cookie === 'paired=1' } }
+  const ctx = pairedCtx((request) => request.headers.cookie === 'paired=1')
   const service = { overview: () => ({ providers: [], updatedAt: 1 }) }
   const route = makeOverviewRoute(ctx, service)
   const allowed = fakeResponse()
@@ -324,7 +332,7 @@ test('overview route requires paired access and returns no-store JSON', () => {
 })
 
 test('cross-site routes are rejected and refresh is POST-only', async () => {
-  const ctx = { remoteWebUiPairing: { isPairedDevice: () => true } }
+  const ctx = pairedCtx()
   const forceFlags = []
   const service = { overview: () => ({ providers: [] }), refresh: async (force) => { forceFlags.push(force) } }
   const route = makeRefreshRoute(ctx, service)
@@ -706,7 +714,7 @@ test('the retired auto-reset endpoint is a 410 tombstone without any side effect
   const fetchImpl = recordingFetch()
   const service = createIsolatedQuotaService(makeContext(), { logMirror: () => {}, fetchImpl, legacyAutoSettingsPath: settingsPath })
   try {
-    const route = makeRetiredAutoResetRoute({ remoteWebUiPairing: { isPairedDevice: () => true } })
+    const route = makeRetiredAutoResetRoute(pairedCtx())
     assert.equal(route.kind, 'exact')
     assert.equal(route.path, '/api/dsh-quota-watch/auto-reset')
 
@@ -750,7 +758,7 @@ test('acknowledge and receipt routes live under the reset-cards namespace as exa
   assert.equal(ROUTES.resetReceipt, '/api/dsh-quota-watch/reset-cards/receipt')
   assert.equal(CLIENT_ROUTES.resetAcknowledge, 'api/dsh-quota-watch/reset-cards/acknowledge')
   assert.equal(CLIENT_ROUTES.resetReceipt, 'api/dsh-quota-watch/reset-cards/receipt')
-  const ctx = { remoteWebUiPairing: { isPairedDevice: () => true } }
+  const ctx = pairedCtx()
   const service = {
     acknowledgeManualOutcome: async () => ({ ok: true }),
     acknowledgeKnownReceipt: () => ({ ok: true }),
@@ -1023,7 +1031,7 @@ test('the overview route stamps the watcher and answers from cache without waiti
     await service.refresh()
     clock += 3_600_000
     await service.refresh() // engages the pause
-    const route = makeOverviewRoute({ remoteWebUiPairing: { isPairedDevice: () => true } }, service)
+    const route = makeOverviewRoute(pairedCtx(), service)
     const res = fakeResponse()
     await route.handler(pairedRequest({ method: 'GET' }), res)
     assert.equal(res.statusCode, 200)

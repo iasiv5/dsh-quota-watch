@@ -46,13 +46,17 @@ export function isLoopbackRequest(request) {
 
 function pairingService(ctx) {
   try {
+    // Sanctioned non-throwing lookup: works whenever a future host provides
+    // the pairing service again. On cordis Local a bare `ctx.remoteWebUiPairing`
+    // property read throws for a non-injected service, so it must not be used
+    // as a fallback (the service itself is absent from 0.2.x hosts — pairing
+    // authorization currently degrades to loopback-only).
     const fromGet = typeof ctx.get === 'function' ? ctx.get('remoteWebUiPairing', false) : undefined
     if (fromGet && typeof fromGet.isPairedDevice === 'function') return fromGet
   } catch {
     // Missing optional pairing service stays loopback-only.
   }
-  const direct = ctx.remoteWebUiPairing
-  return direct && typeof direct.isPairedDevice === 'function' ? direct : undefined
+  return undefined
 }
 
 /** Allow the local desktop or a browser session explicitly paired by the host. */
