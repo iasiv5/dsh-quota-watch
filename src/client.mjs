@@ -23,6 +23,23 @@ const ZERO_INSETS = { left: 0, right: 0, top: 0, bottom: 0 }
 // rails, squeezed desktop layouts) — hide it and let the capsule carry the
 // entry. clientWidth 0 (no layout yet, jsdom) counts as "unknown", not narrow.
 const CARD_MIN_WIDTH = 160
+// Official sidebar foot action slot (dsh-client-ui-sidebar contract). The
+// slot-first seat mounts the card through it; the sidebarCol/footArea
+// substring discovery stays as the legacy-host fallback.
+const CARD_SLOT_NAME = 'sidebar.footer.action'
+
+/** Host React for the sidebar.footer.action slot seat (0.2.x shells render
+ * registrant components with their own React). The module-loader factory
+ * passes `require`; a direct ESM import (node --test, DOM tests) has none, in
+ * which case slot mode simply stays off and the physical-insert fallback runs
+ * exactly as before. Never throws. */
+function loadReact() {
+  try {
+    return typeof require === 'function' ? require('react') : null
+  } catch {
+    return null
+  }
+}
 
 const COPY = {
   zh: {
@@ -564,6 +581,9 @@ export function mountQuotaCard({
   // Shell-takeover sentinel (2026-10-13 ds-bot): inject `ctx.slots` to arm it.
   // Injectable so DOM tests and exotic hosts keep the legacy behavior.
   slots = null,
+  // Host React for the slot-first sidebar seat; default resolves through the
+  // module-loader factory and stays null under node --test / DOM tests.
+  react = loadReact(),
 } = {}) {
   if (!doc?.body || typeof fetchImpl !== 'function') return () => {}
   if (doc.querySelector(CARD_SELECTOR) || doc.querySelector(FLOAT_SELECTOR)) return () => {}
@@ -1551,7 +1571,7 @@ export function mountQuotaCard({
     event.preventDefault()
     onSurfaceClick()
   }
-  const hasCardMount = () => Boolean(footArea(doc))
+  const hasCardMount = () => (slotMode ? slotParent !== null : Boolean(footArea(doc)))
 
   // Cross-profile narrow-container detection: a measurably narrow foot would
   // clip the card into unreadable text regardless of HOW the host signals its
@@ -1560,6 +1580,13 @@ export function mountQuotaCard({
   let currentFoot = null
   let footTooNarrow = false
   let noDataHidden = false
+  // Slot-first seat state (2026-10-19): when the official sidebar.footer.action
+  // slot carries the card, the CSS-substring discovery below is bypassed
+  // entirely; it remains the fallback for hosts without the slot.
+  let slotMode = false
+  let slotParent = null
+  let slotDispose = null
+  let anchorRetryTimer = null
   // The sidebar foot belongs to whoever registers sidebar.workspaces
   // (ui-sidebar doc: "the foot is the sidebar.workspaces registrant's"). The
   // official workspace tree registers at default priority 0 (ui-workspace); a
@@ -1578,7 +1605,8 @@ export function mountQuotaCard({
     }
   }
   const syncFootNarrowness = () => {
-    footTooNarrow = currentFoot !== null && currentFoot.clientWidth > 0 && currentFoot.clientWidth < CARD_MIN_WIDTH
+    const seat = slotParent ?? currentFoot
+    footTooNarrow = seat !== null && seat.clientWidth > 0 && seat.clientWidth < CARD_MIN_WIDTH
   }
   const syncCardVisibility = () => {
     syncFootNarrowness()
@@ -1686,6 +1714,7 @@ export function mountQuotaCard({
   }
 
   const place = () => {
+    if (slotMode) return
     const foot = footArea(doc)
     if (!foot) return
     // Claim the first slot of the sidebar footer so the card sits above the
@@ -1748,7 +1777,88 @@ export function mountQuotaCard({
     if (!batchTouchesSeatDiscovery(records) && (seatValid() || noLiveFoot)) return
     schedulePlace()
   })
-  observer.observe(doc.body, { childList: true, subtree: true })
+  if (!slotMode) observer.observe(doc.body, { childList: true, subtree: true })
+  // --- Slot-first seat (2026-10-19): 0.2.x shells render the official
+  // sidebar.footer.action list slot (dsh-client-ui-sidebar contract: kind
+  // 'list', owner passes only { wide }). Mounting through it removes the
+  // sidebarCol/footArea CSS-substring anchor dependency entirely — the anchor
+  // discovery below remains purely as the legacy-host fallback and engages
+  // only when the slot is unavailable or not declared by the shell.
+  if (slots && typeof slots.inject === 'function' && typeof slots.register === 'function'
+    && react && typeof react.createElement === 'function') {
+    try {
+      // No declaration probe: the plugin facade's spec() proved unreliable on
+      // 0.2.1-rc.2 (returns undefined even for shell-declared slots, while
+      // register()+render works — the settings.section precedent). The mount
+      // confirmation below is the real gate: if the shell never renders the
+      // slot, the card falls back to the physical anchor seat within seconds.
+      const SLOT_SEAT_ID = 'quota-watch-card'
+        const CardSeat = (props) => {
+          // Owner share is { wide }; the width guard keeps measuring instead
+          // of trusting host collapse signals (they proved host-specific, see
+          // the syncCardVisibility note).
+          void props
+          return react.createElement('div', {
+            ref: (el) => {
+              if (!slotMode) return // a late render after fallback engaged: ignore, container is physically seated
+              slotParent = el
+              if (el) {
+                // Adopt the imperative card container: React owns this mount
+                // div but none of its (foreign) children, so the manual
+                // append is the standard escape hatch and reconciles cleanly.
+                if (container.parentElement !== el) el.appendChild(container)
+                footResizeObserver?.observe(el)
+              } else {
+                footResizeObserver?.disconnect()
+              }
+            },
+            'data-dsh-quota-watch-slot': '',
+          })
+      }
+      slotDispose = slots.inject(CARD_SLOT_NAME, () => slots.register(
+        { name: CARD_SLOT_NAME, id: SLOT_SEAT_ID },
+        CardSeat,
+      ))
+      // Optimistic engage; the mount confirmation below is the truth test —
+      // if the shell never renders the slot (declared but region absent),
+      // the card would silently vanish, so fall back to the physical seat.
+      slotMode = true
+      syncCardVisibility()
+      win.setTimeout(() => {
+        if (disposed || !slotMode || slotParent) return
+        try { win.console?.debug?.('[dsh-quota-watch] slot seat: host never rendered the slot mount — falling back to legacy anchor seat') } catch { /* no console */ }
+        slotMode = false
+        slotParent = null
+        slotDispose?.()
+        slotDispose = null
+        schedulePlace()
+        syncCardVisibility()
+      }, 5_000)
+    } catch (error) {
+      try { win.console?.debug?.(`[dsh-quota-watch] slot seat unavailable (${error?.message ?? error}) — using legacy anchor seat`) } catch { /* no console */ }
+    }
+  } else {
+    try { win.console?.debug?.('[dsh-quota-watch] slot seat: slots facade or host React unavailable — using legacy anchor seat') } catch { /* no console */ }
+  }
+  if (!slotMode) {
+    // Blind-spot re-probe (fallback mode only): the seat-gate observer can
+    // only schedule place() for batches carrying the anchor markers, so if
+    // the shell ever renames those CSS-modules classes the gate would never
+    // re-arm after a missed seat. A slow unseated-only retry bounds that
+    // drift to one interval, and the warn-once makes the state diagnosable
+    // instead of silent. Self-idles once seated; cleared on dispose.
+    let anchorMisses = 0
+    anchorRetryTimer = win.setInterval(() => {
+      if (disposed || seatValid()) return
+      schedulePlace()
+      anchorMisses += 1
+      if (anchorMisses === 4) {
+        try {
+          win.console?.warn?.('[dsh-quota-watch] sidebar anchor (sidebarCol/footArea) not found — sidebar card not mounted; capsule unaffected')
+        } catch { /* console unavailable */ }
+      }
+    }, 15_000)
+  }
   // The DSH locale feature mirrors every language switch onto <html lang>;
   // re-render on that flip so the UI follows 设置 → 语言 without a reload.
   // A no-op flip (same value) never fires, so this costs nothing at rest.
@@ -1943,6 +2053,9 @@ export function mountQuotaCard({
     stopPolling()
     if (outcomeNoticeTimer !== undefined) win.clearTimeout(outcomeNoticeTimer)
     outcomeNoticeTimer = undefined
+    if (anchorRetryTimer !== null) win.clearInterval(anchorRetryTimer)
+    anchorRetryTimer = null
+    slotDispose?.()
     observer.disconnect()
     langObserver?.disconnect()
     if (offShellTakeover) offShellTakeover()

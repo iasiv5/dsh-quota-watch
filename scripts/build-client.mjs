@@ -9,6 +9,10 @@ const result = await esbuild.build({
   target: 'es2022',
   write: false,
   minify: false,
+  // React is provided by the host client bundle: the module-loader factory
+  // passes `require` through, so keeping react external defers resolution to
+  // runtime instead of failing on a build-time copy.
+  external: ['react'],
 })
 
 const body = result.outputFiles[0].text
