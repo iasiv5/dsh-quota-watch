@@ -39,16 +39,16 @@ createResetCards({
 - ADR 0004/0005：手动核销语义零改动（journal/receipt/acknowledge 行为由既有测试钉住）。
 - ADR 0007：外部 interface 冻结；未触碰簇测试零修改；每笔提交同笔携带重建的 `lib/client.js`。
 - 依赖红线：`dependencies` 禁 `@deepseek-ai/*`、`src/` 零该 scope import（`tests/package-shape.test.mjs` 守卫，红即停）；本计划零依赖变更。
-- 命名：文件 `src/client/reset-cards.mjs`、测试 `tests/reset-cards.test.mjs`；模块内部词汇沿用 `reset*` 系；领域术语 **Manual redemption flow**（GLOSSARY.md 已定稿）。
+- 命名：文件 `src/client/reset-cards.mjs`、测试 `tests/client-reset-cards.test.mjs`；模块内部词汇沿用 `reset*` 系；领域术语 **Manual redemption flow**（GLOSSARY.md 已定稿）。
 - 提交纪律：核准邮箱（`26645513+iasiv5@users.noreply.github.com` 或 `iasi@163.com`）；conventional commits；直推 main 小步；不为纯重构发版。
 - 环境与命令：Windows，仓库用 npm（`package-lock.json`）；所有命令在仓库根 `dsh-quota-watch/` 下执行。
 - **本机环境基线（Windows）与失败白名单**：本机 `npm test` 存在 5 条已核证的环境性失败（同一 HEAD 的 GitHub CI conclusion=success；机理：`scripts/check-public-package.mjs:130` 的 `relative()` 在 Windows 产生反斜杠路径致 filePatternMatcher 漏配，另几条为 POSIX errno 失败模拟在本机不复现）。本地一切 `npm test` 判据 =「失败集合与白名单**精确相等**」，push 后 **CI 必绿为最终裁判**；B2 的「未触碰测试零修改通过」在本机按白名单语义执行（除白名单外零失败且零修改）。白名单（仅此 5 条）：
-  1. tests/client.test.mjs 'a confirmed success notice clears after about five seconds; refusals persist'（Task 5 迁移删除后白名单缩为 4 条）
+  1. tests/client.test.mjs 'a confirmed success notice clears after about five seconds; refusals persist'（**本机时序敏感项：允许失败或通过**——2026-10-24 执行期实录其在两轮间翻转；Task 5 迁移删除后白名单固化为 4 条）
   2. tests/manual-outcome.test.mjs 'begin reports a deterministic storage failure instead of a phantom record'
   3. tests/manual-redemption.test.mjs 'a failed journal write sends no POST at all'
   4. tests/manual-redemption.test.mjs 'a known receipt write failure keeps the disk in-flight and the wallet locked'
   5. tests/security-scan.test.mjs 'pack manifest derivation expands the package.json files allowlist offline'
-- **标准白名单判据命令**（各任务复用，`<K>` 为任务号）：`npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task<K>.log`，随后 `grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task<K>.log | grep -v "failing tests:" | sort -u`。说明：本机 spec 报告每个失败标题在运行段与末尾汇总段各出现一次，另有「✖ failing tests:」标题行——直接 `grep "^✖"` 出 2N+1 行，必须去重并剔除标题行。断言：输出行数恰为白名单条数（Task 5 前 5、后 4；可加 `| wc -l` 核行数），标题与白名单按子串对照（行尾 ms 耗时后缀不参与）。注意：`npm test` 经管道 tee 后退出码被吞，判定只认提取命令的集合断言，**不得**将 `npm test` 直接放入 `&&` 链（本机非零退出会掐断）；提取管道居 `&&` 链首属恒命中（预期非空输出），安全。提取命令自证：首跑（Task 1 Step 4）先在评审落盘的 `probe-npmtest-baseline.log` 上运行同一管道，核对恰 5 行、恰为白名单 5 标题（评审 probe-whitelist-extract-selftest.log 已亲证 dedup-count=5）；若未来 node 版本变更输出格式致 `^✖` 失配，以实际 log 固定等价提取命令后复用，白名单本身不改。
+- **标准白名单判据命令**（各任务复用，`<K>` 为任务号）：`npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task<K>.log`，随后 `grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task<K>.log | grep -v "failing tests:" | sort -u`。说明：本机 spec 报告每个失败标题在运行段与末尾汇总段各出现一次，另有「✖ failing tests:」标题行——直接 `grep "^✖"` 出 2N+1 行，必须去重并剔除标题行。断言：失败标题集必须是白名单的**子集**（白名单外零失败），且 4 条稳定项（manual-outcome.test.mjs:82、manual-redemption.test.mjs:130、manual-redemption.test.mjs:200、security-scan.test.mjs:39 对应标题）必现；2044 为时序敏感项允许红或绿，故 Task 5 前提取行数为 4 或 5、Task 5 删除后恰 4；标题与白名单按子串对照（行尾 ms 耗时后缀不参与）。注意：`npm test` 经管道 tee 后退出码被吞，判定只认提取命令的集合断言，**不得**将 `npm test` 直接放入 `&&` 链（本机非零退出会掐断）；提取管道居 `&&` 链首属恒命中（预期非空输出），安全。提取命令自证：首跑（Task 1 Step 4）先在评审落盘的 `probe-npmtest-baseline.log` 上运行同一管道，核对恰 5 行、恰为白名单 5 标题（评审 probe-whitelist-extract-selftest.log 已亲证 dedup-count=5）；若未来 node 版本变更输出格式致 `^✖` 失配，以实际 log 固定等价提取命令后复用，白名单本身不改。
 - `npm run security:check` 本机绿但 pack 面匹配在 Windows 缩水（同路径分隔符根因，本机漏扫只作弱信号）；CI 侧完整。
 
 ## 输入工件
@@ -60,7 +60,7 @@ createResetCards({
 ## 文件结构与职责
 
 - Create: `src/client/reset-cards.mjs` — Manual redemption flow 模块（状态 + 渲染 + 流程 + 私有传输）。
-- Create: `tests/reset-cards.test.mjs` — 模块直测（jsdom document + 真 COPY 词典 + stub fetch/refresh）。
+- Create: `tests/client-reset-cards.test.mjs` — 模块直测（jsdom document + 真 COPY 词典 + stub fetch/refresh）。
 - Modify: `src/client.mjs` — 删除迁出的状态与函数；接线注入与 6 个调用点；追加 `export const COPY`（供直测取真词典；加法导出，不触碰 mountQuotaCard 契约）。
 - Modify: `tests/client.test.mjs` — 删除 15 条已迁直测的旧集成测试（清单见 Task 5），保留 5 条集成。
 - Modify: `.github/workflows/ci.yml` — `npm run build` 后插入漂移门禁。
@@ -87,36 +87,36 @@ createResetCards({
 - [ ] Step 4: 确认干净态通过（白名单语义首跑 + 提取命令自证）
   - Run: `grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/probe-npmtest-baseline.log | grep -v "failing tests:" | sort -u`（自证：恰 5 行、恰为白名单 5 标题）
   - Run: `cd dsh-quota-watch && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task1.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task1.log | grep -v "failing tests:" | sort -u | wc -l && npm run build && git diff --exit-code lib/client.js && npm run security:check`
-  - Expected: 自证恰 5 行；任务 log 提取行数恰 5 且标题对照白名单；build/diff/security:check 零退出（security:check 本机弱信号）。
+  - Expected: 自证恰 5 行；任务 log 提取行数为 4 或 5、全属白名单且 4 条稳定项必现；build/diff/security:check 零退出（security:check 本机弱信号）。
 - [ ] Step 5: checkpoint commit
   - Run: `git config user.email` 确认是核准邮箱后：`git add .github/workflows/ci.yml docs/developers.md GLOSSARY.md docs/adr/0007-client-internal-seams.md && git commit -m "chore(ci): gate lib/client.js freshness after build (ADR 0007, glossary term)"`
 
 ### Task 2: reset-cards 模块骨架 + 四态渲染直测
 
 - 目标：模块文件落地，`renderSection` 的纯渲染行为直测全绿（此任务不接线，旧代码不动）。
-- 涉及文件：Create `src/client/reset-cards.mjs`、Create `tests/reset-cards.test.mjs`。
+- 涉及文件：Create `src/client/reset-cards.mjs`、Create `tests/client-reset-cards.test.mjs`。
 - 接口契约：
   - Consumes: `CLIENT_ROUTES`（src/shared.mjs）、`parseResetExpiryTime`（src/core/reset.mjs）、`text()` 辅助（从 client.mjs 内联复制为模块私有，不改 client.mjs）。
   - Produces: `createResetCards`（完整签名见架构快照）与 `renderSection` 实现；直测样板（jsdom + COPY 词典 + stub 依赖）。
 - 验证范围：新文件单测绿 + 全量测试仍绿（旧路径未动）。
 
 - [ ] Step 1: 写失败直测（四态渲染）
-  - Change: `tests/reset-cards.test.mjs` 新建：JSDOM document、`copy: () => COPY['zh']`（此时从 client.mjs import COPY 会失败——先断言 `import { COPY } from '../src/client.mjs'`），断言 `renderSection` 对 `snapshot.reset` 的 loading / error / ready-empty（折叠行）/ ready-available（含行与 expiry 标签）四态 DOM（断言值从原测试 'the card section renders four states purely from snapshot.reset' 原样复制）。
-  - Run: `cd dsh-quota-watch && node --test tests/reset-cards.test.mjs`
+  - Change: `tests/client-reset-cards.test.mjs` 新建：JSDOM document、`copy: () => COPY['zh']`（此时从 client.mjs import COPY 会失败——先断言 `import { COPY } from '../src/client.mjs'`），断言 `renderSection` 对 `snapshot.reset` 的 loading / error / ready-empty（折叠行）/ ready-available（含行与 expiry 标签）四态 DOM（断言值从原测试 'the card section renders four states purely from snapshot.reset' 原样复制）。
+  - Run: `cd dsh-quota-watch && node --test tests/client-reset-cards.test.mjs`
   - Expected: 失败——`Cannot find module '../src/client/reset-cards.mjs'`（或 COPY 未导出）。
 - [ ] Step 2: 写最小实现
   - Change: 新建 `src/client/reset-cards.mjs`：导出 `createResetCards`（签名见架构快照），实现内部状态、`lastSnapshot`、私有 `fetchResetEnvelope`/`RESET_FETCH_TIMEOUT_MS`（自 client.mjs 548-569 原样迁入）、私有 `text()`、`renderSection(snapshot)`（自 `renderResetSection`/`renderResetRow`/`earliestExpiryCard`/`earliestExpiryLabel` 迁入渲染部分；读 `copy()` 取词；返回 Node）；`renderOutcomeBlock/clearPending/dispose` 先落为最小桩（返回 `null`/`false`/空）。同时在 `src/client.mjs` 追加 `export const COPY`（仅追加导出，原 const 声明不变）。记录：esbuild cjs 产物会在 `lib/client.js` 的 exports 对象上新增 `COPY` 键——这是包 `./client` 导出面的**加法扩展**；基线 B1 冻结的是既有导出不变，新增键不构成违反，特此记录以免字面冲突。
 - [ ] Step 3: 迁纯渲染直测
   - Change: 逐条把下列旧测试的断言改写为直测（DOM 断言原样复制，不放宽）：'the card section renders four states purely from snapshot.reset'、'the earliest expiry label, its focusable detail and host picking share one time source'、'a reported weekly window renders real data in fixed order without the placeholder'、'Chinese reset and unlimited notes use spaced parentheses and padded dates'、'domestic reset section stays two card lines with Beijing expiry and no auto-use controls'、'English empty reset section collapses to one row and keeps its separator'（后两条分别用 `COPY['zh']`/`COPY['en']`）。
-  - Run: `cd dsh-quota-watch && node --test tests/reset-cards.test.mjs && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task2.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task2.log | grep -v "failing tests:" | sort -u | wc -l`
-  - Expected: 直测文件零失败（单文件命令未过链即停）；提取行数恰 5 且标题对照白名单（client.test.mjs 未动）。
+  - Run: `cd dsh-quota-watch && node --test tests/client-reset-cards.test.mjs && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task2.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task2.log | grep -v "failing tests:" | sort -u | wc -l`
+  - Expected: 直测文件零失败（单文件命令未过链即停）；提取行数为 4 或 5、全属白名单且 4 条稳定项必现（client.test.mjs 未动）。
 - [ ] Step 4: checkpoint commit
-  - Run: `git add src/client/reset-cards.mjs tests/reset-cards.test.mjs src/client.mjs && git commit -m "refactor(client): add reset-cards internal module with rendering tests (unwired)"`
+  - Run: `git add src/client/reset-cards.mjs tests/client-reset-cards.test.mjs src/client.mjs && git commit -m "refactor(client): add reset-cards internal module with rendering tests (unwired)"`
 
 ### Task 3: 流程逻辑直测（按钮状态机、花卡、回执、clearPending）
 
 - 目标：模块行为完整：确认框、双确认单 POST、outcome 分类呈现、acknowledge/receipt、Q16 定时器、`renderOutcomeBlock`、`clearPending`。
-- 涉及文件：`src/client/reset-cards.mjs`、`tests/reset-cards.test.mjs`。
+- 涉及文件：`src/client/reset-cards.mjs`、`tests/client-reset-cards.test.mjs`。
 - 接口契约：
   - Consumes: Task 2 的骨架与直测样板；`COPY`（已导出）。
   - Produces: 完整 `createResetCards` 行为（含 `clearPending(): boolean` 布尔语义——仅在确有待确认项并清掉时 true）。
@@ -124,15 +124,15 @@ createResetCards({
 
 - [ ] Step 1: 写失败直测（流程）
   - Change: 追加直测（断言自旧测试原样复制；fetch 用 stub 记录调用，`refresh` 用 stub，`win.setTimeout` 用真实 JSDOM window + `outcomeNoticeMs: 20`）：'the confirm box names the card type, both affected windows and irreversibility'（1705）、'a known success answer shows the result and auto-confirms delivery once'（1850）、'a known refusal shows the upstream message and confirms delivery too'（1861）、'a lost use answer never claims failure; the snapshot receipt persists until acknowledged'（1871）、'the unknown warning also reads in English'（1945，`COPY['en']`）、'an unreadable outcome journal shows manual use as unavailable and offers no button'（1966）、'a confirmed success notice clears after about five seconds; refusals persist'（2044；直测标题改为与注入参数一致，如 'a confirmed success notice clears after the configured delay; refusals persist'；`outcomeNoticeMs: 20` + `await new Promise(r => setTimeout(r, 50))`）、'after a manual spend the wallet comes from the overview snapshot, not a second list'（1609，refresh stub 断言恰好一次）、'reset rows wrap on narrow widths and keep the spend button focusable'（1648）、双确认恰好一次 spend POST（核心断言取自 1763：stub 记录 POST 次数 === 1 且 notice 落地）、`clearPending` 布尔语义（有待确认 → true 并清除；无 → false）。
-  - Run: `cd dsh-quota-watch && node --test tests/reset-cards.test.mjs`
+  - Run: `cd dsh-quota-watch && node --test tests/client-reset-cards.test.mjs`
   - Expected: 流程相关新断言失败（桩未实现）。
 - [ ] Step 2: 写最小实现
   - Change: 迁入 `spendResetCard`/`acknowledgeOutcome`/`renderManualOutcomeBlock`/`manualLocked`（自 client.mjs 1035-1159、1047-1098、1105-1115 原样迁入；`syncPop()` 改 `onDirty()`，`poll()` 改 `await refresh()`，`openKey` 判断删除——门控已由宿主 onDirty 承担；`win.clearTimeout/setTimeout` 沿用注入的 win）；实现 `renderOutcomeBlock`、`clearPending`、`dispose`（清 timer）；确认框取消按钮内 `resetPending = undefined` 后调 `onDirty()`。
 - [ ] Step 3: 确认通过
-  - Run: `cd dsh-quota-watch && node --test tests/reset-cards.test.mjs && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task3.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task3.log | grep -v "failing tests:" | sort -u | wc -l`
-  - Expected: 直测文件零失败；提取行数恰 5 且标题对照白名单（client.test.mjs 仍未动）。专项护栏：直测版 '…clears after the configured delay…' 若在本机红（即白名单外新增失败），**立即停下上报，不得为迁绿放宽断言**。
+  - Run: `cd dsh-quota-watch && node --test tests/client-reset-cards.test.mjs && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task3.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task3.log | grep -v "failing tests:" | sort -u | wc -l`
+  - Expected: 直测文件零失败；提取行数为 4 或 5、全属白名单且 4 条稳定项必现（client.test.mjs 仍未动）。专项护栏：直测版 '…clears after the configured delay…' 若在本机红（即白名单外新增失败），**立即停下上报，不得为迁绿放宽断言**。
 - [ ] Step 4: checkpoint commit
-  - Run: `git add src/client/reset-cards.mjs tests/reset-cards.test.mjs && git commit -m "refactor(client): complete reset-cards flow behaviour with direct tests (unwired)"`
+  - Run: `git add src/client/reset-cards.mjs tests/client-reset-cards.test.mjs && git commit -m "refactor(client): complete reset-cards flow behaviour with direct tests (unwired)"`
 
 ### Task 4: 接线 client.mjs（删旧、注入、清除点改写、重建 bundle）
 
@@ -149,7 +149,7 @@ createResetCards({
   - Change: 删除闭包状态声明（857-861 五个）、`manualLocked`/`spendResetCard`/`acknowledgeOutcome`/`renderManualOutcomeBlock`/`appendOutcomeBlock`/`renderResetRow`/`renderResetSection`/`earliestExpiryCard`/`earliestExpiryLabel` 函数与 `fetchResetEnvelope`/`RESET_FETCH_TIMEOUT_MS`。引用面已闭合（earliestExpiry* 定义于 374/384，引用 385/1165/1173 全部位于迁出函数体内），无需兜底分支——不允许「改由模块导出补充」的临场改道。删除后判据：`grep -n "earliestExpiry" src/client.mjs` 零命中（grep 零命中退出码为 1，属预期，单独运行、不入 && 链），`npm test` 兜底。
 - [ ] Step 3: 验证（含硬护栏）
   - Run: `cd dsh-quota-watch && git diff --stat tests/client.test.mjs && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task4.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task4.log | grep -v "failing tests:" | sort -u | wc -l`
-  - Expected: `git diff --stat tests/client.test.mjs` 输出为空（零修改）；提取行数恰 5 且标题对照白名单。
+  - Expected: `git diff --stat tests/client.test.mjs` 输出为空（零修改）；提取行数为 4 或 5、全属白名单且 4 条稳定项必现。
 - [ ] Step 4: 重建 bundle 并提交
   - Run: `cd dsh-quota-watch && npm run build && git diff --stat lib/client.js && git add src/client.mjs lib/client.js && git commit -m "refactor(client): wire mountQuotaCard to the reset-cards internal seam; rebuild bundle"`
   - Expected: bundle diff 非空且同笔提交；提交后 `git status` 干净。

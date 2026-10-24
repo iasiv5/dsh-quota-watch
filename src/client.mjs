@@ -41,7 +41,7 @@ function loadReact() {
   }
 }
 
-const COPY = {
+export const COPY = {
   zh: {
     title: 'Token额度',
     openDetails: '查看详情',
