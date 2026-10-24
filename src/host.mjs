@@ -1,6 +1,6 @@
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { credentialKey, credentialRef, isCredentialRefName } from '@deepseek-ai/dsh-credentials'
+import { credentialKey, credentialRef, isCredentialRefName } from './credential-ref.mjs'
 import { buildCopilotProbe, buildGlmProbe, buildGlmUsageProbe, parseCopilotUser, parseGlmPlan, parseGlmUsage, usageDayWindow } from './core/adapters.mjs'
 import {
   buildResetListSpec,

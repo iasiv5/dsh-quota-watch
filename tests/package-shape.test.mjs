@@ -18,6 +18,25 @@ test('package metadata identifies the approved DSH plugin and release target', (
   assert.equal(packageJson.dsh.client.platform, 'web')
 })
 
+test('dependencies carry zero @deepseek-ai/* keys — profile hoisting would shadow app-bundled core packages', async () => {
+  // 2026-10-24：@deepseek-ai/dsh-credentials@0.1.7-rc.2 曾被 profile pnpm 提升到顶层，
+  // 按同名目录遮蔽应用自带的 0.2.1-rc.x（dsh-m#7 同类）；三函数已 vendor 进
+  // src/credential-ref.mjs。守卫见 tests/credential-ref.test.mjs 与下方源锚。
+  const offenders = Object.keys(packageJson.dependencies ?? {}).filter((key) => key.startsWith('@deepseek-ai/'))
+  assert.deepEqual(offenders, [], `dependencies 不得包含 @deepseek-ai/*（防遮蔽；found=${offenders.join('、')}）`)
+  const { globSync } = await import('node:fs')
+  let importHits = 0
+  for (const file of globSync(resolve(root, 'src', '**', '*.mjs'))) {
+    const text = await readFile(file, 'utf8')
+    importHits += text.split(`from '@deepseek-ai/dsh-credentials'`).length - 1
+    importHits += text.split(`from "@deepseek-ai/dsh-credentials"`).length - 1
+  }
+  assert.equal(importHits, 0, `src 不得再 import @deepseek-ai/dsh-credentials（实测 ${importHits} 处）`)
+  const vendored = await readFile(resolve(root, 'src', 'credential-ref.mjs'), 'utf8')
+  assert.ok(vendored.includes('0.2.1-rc.2'), 'vendor 头必须锚定上游版本号（跟版 diff 依据）')
+  assert.ok(vendored.includes('MIT'), 'vendor 头必须带上游许可证标注')
+})
+
 test('public lockfile resolves dependencies over HTTPS npmjs URLs', async () => {
   const lock = JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8'))
   const resolved = Object.values(lock.packages).map((entry) => entry.resolved).filter(Boolean)
