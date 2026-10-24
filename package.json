@@ -1,6 +1,6 @@
 {
   "name": "@iasiv5/dsh-quota-watch",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "description": "DSH Web sidebar monitor for GLM Coding Plan quotas and GitHub Copilot credits",
   "type": "module",
   "main": "./src/host.mjs",
@@ -28,9 +28,6 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
-  },
-  "dependencies": {
-    "@deepseek-ai/dsh-credentials": "0.1.7-rc.2"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.2"
