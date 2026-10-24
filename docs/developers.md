@@ -36,3 +36,6 @@
   核准（`unapproved-public-identity` = 存在非核准邮箱的 author/committer）。
 - 版本守卫语义（宿主对插件的兼容判定）与本地门禁是两回事，见 know-how 033；
   本包声明门槛首选 `dsh.engines.dsh`（2026-10-19 修订口径）。
+- bundle 漂移门禁：凡动 `src/client.mjs`（或任何进 bundle 的文件）的提交必须同笔带上
+  `npm run build` 重建的 `lib/client.js`；CI 在 build 后 `git diff --exit-code lib/client.js`，
+  非零即红（ADR 0007）。

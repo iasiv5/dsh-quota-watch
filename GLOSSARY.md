@@ -48,6 +48,9 @@ _Avoid_: Describing it as an active capability; automatic refresh
 **Manual outcome journal**: The host-side single-entry record of one manual card redemption, durably written before the irreversible POST and kept until the user verifies an unknown outcome or acknowledges a known one. It carries only an opaque attempt id, card type, start time and status — never credentials or provider card ids.
 _Avoid_: Log file (implies diagnostics), retry queue
 
+**Manual redemption flow**: The client-side sequence that carries one card redemption from the explicit confirmation on a reset-card row, through the single irreversible spend request, to outcome presentation and delivery confirmation (receipt or acknowledge). Its data inputs are the host snapshot's reset and manual-outcome slices; a pending outcome keeps the capsule present as a warning entry until the journal record clears.
+_Avoid_: reset flow (the implementation's internal vocabulary), automatic card use (retired), refresh
+
 ### UI surfaces
 
 **Capsule**:

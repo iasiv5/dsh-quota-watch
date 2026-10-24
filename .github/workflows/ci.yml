@@ -22,6 +22,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+      - run: git diff --exit-code lib/client.js
       - run: npm run security:check
       - run: node --check lib/client.js
       - run: npm pack --dry-run --json

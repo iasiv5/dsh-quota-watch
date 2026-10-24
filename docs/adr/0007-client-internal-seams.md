@@ -1,0 +1,15 @@
+# Freeze the client's external interface; deepen mountQuotaCard through internal seams
+
+> Status: Accepted 2026-10-24 (design grill session); implementation opens with the reset-cards cluster. The behavioral term for that cluster lives in GLOSSARY.md ("Manual redemption flow").
+
+`mountQuotaCard` grew into a single ~1,500-line closure holding ~30 shared mutable variables and ten concepts — capsule, seat, panel navigation, GLM/Copilot details, reset cards, manual outcome, drag, polling cadence, i18n — all closing over one state pool. It was the most-churned file in the repository by roughly 4× (67 commits in the month before this decision, against 16 for the next file), and the 17-task retirement wave (ADR 0004/0005) paid for that entanglement one surgical pass at a time. We keep the closure's depth — its external interface is already small — and stop paying for the entanglement:
+
+1. **The external interface is frozen.** `mountQuotaCard`'s options bag, its dispose contract, and the package's `./client` export do not change under this program. Refactor commits may not alter them, and the tests of untouched clusters must pass byte-unmodified as the no-drift guardrail.
+
+2. **Concepts get internal seams.** Each concept cluster moves into `src/client/<cluster>.mjs` with a small real interface (two renderers, a clear, and dispose), its own state, and direct tests in `tests/<cluster>.test.mjs`, following the existing `drag.mjs`/`prefs.mjs` precedent. `mountQuotaCard` remains the thin orchestrator that wires the clusters and keeps the single `renderAll` funnel; the few genuinely boundary-crossing paths stay as integration tests through the real mount.
+
+3. **Cross-module contracts stay narrow and injected.** The first cluster — `reset-cards.mjs`, the Manual redemption flow — receives `copy()` (pull, locale-flip safe), `routes`, `refresh`, `onDirty` and owns its fetch envelope; it knows nothing about `openKey` or the panel. The host's `onDirty` callback keeps the existing `openKey === 'glm'` re-render gate, so byte-behavior is preserved.
+
+4. **Every commit carries its rebuilt bundle.** Commits under this program rebuild `lib/client.js` in the same commit, and CI gains a post-build `git diff --exit-code lib/client.js` so silent artifact drift — which happened once during the retirement wave — is red, not latent.
+
+We choose internal seams over splitting `mountQuotaCard` into sibling entry points (that would widen the external interface the host must learn for zero new leverage) and over leaving the closure alone on the argument that it is "already deep" (depth is a property of the interface; the measured problem was the implementation's locality — 67 commits a month of it). Clusters wrapping still-settling external surfaces wait for upstream to settle first: the Seat cluster — a real seam with two existing adapters (slot-first and physical anchor) — is deliberately sequenced behind capsule-position because the DSH sidebar slot API moved twice in the weeks before this decision.
