@@ -108,7 +108,6 @@ export const COPY = {
       working: '重置中…',
       succeeded: '已重置',
       failed: '重置失败',
-      loadFailed: '读取重置卡失败',
     },
   },
   en: {
@@ -179,7 +178,6 @@ export const COPY = {
       working: 'Resetting…',
       succeeded: 'Reset done',
       failed: 'Reset failed',
-      loadFailed: 'Could not read reset cards',
     },
   },
 }
