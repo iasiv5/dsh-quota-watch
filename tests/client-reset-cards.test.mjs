@@ -189,3 +189,162 @@ test('clearPending clears exactly one uncommitted confirmation and reports wheth
   assert.equal(h.flow.clearPending(), false, 'nothing pending reports false without side effects')
   h.window.close()
 })
+
+test('the confirm box names the card type, both affected windows and irreversibility', async () => {
+  {
+    const h = flowHarness({ reset: { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } } })
+    const box = await clickUse(h)
+    assert.ok(box)
+    assert.match(box.textContent, /5 小时/)
+    assert.match(box.textContent, /无法撤销/)
+    h.window.close()
+  }
+  {
+    const h = flowHarness({ reset: { status: 'ready', cards: { fiveHour: [], week: [{ recordId: 8, expireTime: '2026-12-01 09:00:00' }] } } })
+    const box = await clickUse(h)
+    assert.ok(box)
+    assert.match(box.textContent, /每周重置卡|每周额度/)
+    assert.match(box.textContent, /5 小时额度/, 'a weekly card names the 5h window it also clears')
+    assert.match(box.textContent, /无法撤销/)
+    h.window.close()
+  }
+})
+
+test('a known success answer shows the result and auto-confirms delivery once', async () => {
+  const h = flowHarness({ use: { ok: true, message: '操作成功', attemptId: 'att-1' }, receipt: 'ok' })
+  await confirmSpend(h)
+  assert.match(h.text(), /已重置/)
+  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
+  assert.equal(receiptPosts.length, 1, 'exactly one delivery confirmation')
+  assert.match(receiptPosts[0].body ?? '', /att-1/, 'the receipt carries the same attemptId')
+  assert.equal(h.state.useCalls, 1, "no retry behind the user's back")
+})
+
+test('a known refusal shows the upstream message and confirms delivery too', async () => {
+  const h = flowHarness({ use: { ok: false, error: 'rejected', message: '指定的重置次数不可用', attemptId: 'att-2' }, receipt: 'ok' })
+  await confirmSpend(h)
+  assert.match(h.text(), /不可用/, 'the definite refusal is shown verbatim')
+  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
+  assert.equal(receiptPosts.length, 1)
+  assert.match(receiptPosts[0].body ?? '', /att-2/)
+})
+
+test('a lost use answer never claims failure; the snapshot receipt persists until acknowledged', async () => {
+  const h = flowHarness({
+    use: 'transport-lost',
+    receipt: 'ok',
+    overviewExtra: (state) => (state.useCalls > 0 && state.receiptCalls.length === 0
+      ? { manualOutcome: { attemptId: 'att-3', resetType: 'WEEK', startedAt: 1, status: 'known-success' } }
+      : {}),
+  })
+  await confirmSpend(h)
+  assert.match(h.text(), /结果未确认/, 'an ambiguous transport loss is never a "failure"')
+  assert.equal(h.state.useCalls, 1, 'no blind retry')
+
+  const block = h.outcomeBlock()
+  assert.ok(block, 'the persistent receipt block renders from the snapshot alone')
+  assert.match(block.textContent, /已确认成功/)
+  block.querySelector('button').dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  for (let hop = 0; hop < 6; hop += 1) await turn()
+  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
+  assert.equal(receiptPosts.length, 1)
+  assert.match(receiptPosts[0].body ?? '', /att-3/)
+  assert.equal(h.outcomeBlock(), null, 'the acknowledged receipt clears from the snapshot')
+})
+
+test('the unknown warning also reads in English', async () => {
+  const h = flowHarness({
+    locale: 'en-US',
+    overviewExtra: { manualOutcome: { attemptId: 'att-en', resetType: 'WEEK', startedAt: 1, status: 'unknown' } },
+  })
+  const block = h.outcomeBlock()
+  assert.ok(block)
+  assert.match(block.textContent, /may have been spent/i)
+  assert.match(block.textContent, /I verified it/)
+})
+
+test('an unreadable outcome journal shows manual use as unavailable and offers no button', async () => {
+  const h = flowHarness({
+    reset: { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } },
+    overviewExtra: { manualOutcomeError: 'storage-unavailable' },
+  })
+  assert.match(h.text(), /手动用卡暂不可用/)
+  assert.equal(h.outcomeBlock()?.querySelector('button') ?? null, null, 'a broken journal offers no acknowledge/verify action')
+  assert.equal(h.requests.some((row) => row.path.endsWith('/reset-cards/use')), false)
+})
+
+test('a confirmed success notice clears after the configured delay; refusals persist', async () => {
+  // The notice window is injected wide (150ms) on purpose: Windows timer
+  // granularity (~15ms per setTimeout(0) turn) can alias away an entire
+  // 30ms window between two poll samples — the same mechanism that makes
+  // the integration twin flaky on this machine. Widening the window does
+  // not weaken any assertion: shown → clears after the configured delay →
+  // refusal persists are all still asserted verbatim.
+  const h = flowHarness({ use: { ok: true, message: '操作成功', attemptId: 'att-5' }, receipt: 'ok', outcomeNoticeMs: 150 })
+  await confirmSpend(h)
+  let visible = false
+  let deadline = Date.now() + 2_000
+  while (!visible && Date.now() < deadline) {
+    visible = /已重置/.test(h.text())
+    if (!visible) await turn()
+  }
+  assert.ok(visible, 'the success notice is shown after the spend')
+  let cleared = false
+  deadline = Date.now() + 5_000
+  while (!cleared && Date.now() < deadline) {
+    await turn()
+    cleared = !/已重置/.test(h.text())
+  }
+  assert.ok(cleared, 'the success notice returns to the latest inventory after the configured notice window')
+
+  const refused = flowHarness({ use: { ok: false, error: 'rejected', message: '指定的重置次数不可用', attemptId: 'att-6' }, receipt: 'ok', outcomeNoticeMs: 150 })
+  await confirmSpend(refused)
+  deadline = Date.now() + 2_000
+  while (Date.now() < deadline) await turn()
+  assert.match(refused.text(), /不可用/, 'a refusal stays until the user acts')
+  refused.window.close()
+})
+
+test('after a manual spend the wallet comes from the refresh snapshot, not a second list', async () => {
+  const h = flowHarness({ use: { ok: true, message: '操作成功', attemptId: 'synthetic-attempt' } })
+  assert.match(h.text(), /11\/01/)
+  await confirmSpend(h)
+  assert.match(h.text(), /已重置/)
+  assert.equal(h.requests.some((row) => row.method === 'GET'), false,
+    'the module never issues its own card-list or overview GET')
+  assert.ok(h.state.refreshes >= 1, 'the authoritative overview is re-read after the spend')
+  assert.doesNotMatch(h.text(), /11\/01/, 'the spent card disappears via the refreshed snapshot')
+})
+
+test('double-confirming fires exactly one spend POST and the result still lands', async () => {
+  const h = flowHarness({ use: { ok: true, message: '操作成功', attemptId: 'att-dc' }, receipt: 'ok' })
+  const box = await clickUse(h)
+  const confirmBtn = box.querySelector('.dqw-reset-btn.is-primary')
+  confirmBtn.dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  confirmBtn.dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+  for (let hop = 0; hop < 8; hop += 1) await turn()
+  assert.equal(h.state.useCalls, 1, 'exactly one irreversible POST')
+  assert.match(h.text(), /已重置/, 'the result still lands')
+  assert.equal(h.state.receiptCalls.length, 1, 'the delivery confirmation fires once')
+})
+
+test('an unresolved outcome or unreadable journal locks the spend controls inside the module', async () => {
+  for (const extra of [
+    { manualOutcomeError: 'storage-unavailable' },
+    { manualOutcome: { attemptId: 'att-lock', resetType: 'WEEK', startedAt: 1, status: 'unknown' } },
+  ]) {
+    const h = flowHarness({
+      reset: { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } },
+      overviewExtra: extra,
+    })
+    const use = h.sectionHost.querySelector('.dqw-reset-use')
+    assert.ok(use, String(JSON.stringify(extra)))
+    assert.equal(use.disabled, true, `the spend button is locked: ${JSON.stringify(extra)}`)
+    use.dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
+    await turn()
+    // NB: an unknown outcome block itself renders with the .dqw-reset-confirm
+    // class, so the absence of that selector is NOT a lock signal here.
+    assert.equal(h.requests.some((row) => row.path.endsWith('/reset-cards/use')), false, 'a locked flow never sends a POST')
+    h.window.close()
+  }
+})

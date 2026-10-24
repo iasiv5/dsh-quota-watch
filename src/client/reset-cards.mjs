@@ -117,8 +117,57 @@ export function createResetCards({
    * failure — the persistent snapshot warning takes over instead.
    */
   async function spendResetCard(resetType) {
-    // Filled in by the flow task.
-    void resetType
+    if (resetBusy !== undefined || disposed || manualLocked()) return
+    resetBusy = resetType
+    resetPending = undefined
+    resetNotice = undefined
+    onDirty()
+    let outcome
+    try {
+      outcome = await fetchResetEnvelope(fetchImpl, routes.resetUse, { resetType })
+    } catch {
+      // Transport-level loss: the POST may or may not have consumed a card.
+      outcome = { ok: false, error: 'request-unknown' }
+    } finally {
+      resetBusy = undefined
+    }
+    const copy = copyAccessor()
+    if (outcome.ok === true) {
+      resetNotice = { kind: 'ok', message: copy.resetCards.succeeded, attemptId: outcome.attemptId, known: true }
+    } else if (outcome.error === 'rejected') {
+      resetNotice = { kind: 'error', message: outcome.message ?? copy.resetCards.failed, attemptId: outcome.attemptId, known: true }
+    } else if (outcome.error === 'request-unknown') {
+      resetNotice = { kind: 'unknown', message: copy.resetCards.unconfirmed }
+    } else if (outcome.error === 'storage-unavailable') {
+      resetNotice = { kind: 'error', message: copy.resetCards.storageUnavailable }
+    } else {
+      resetNotice = { kind: 'error', message: outcome.message ?? copy.resetCards.failed }
+    }
+    // The authoritative wallet + outcome record arrive via the overview snapshot.
+    if (!disposed) await refresh()
+    if (!disposed) onDirty()
+    // A known outcome was displayed: confirm delivery so the host receipt can
+    // clear. A failed confirmation keeps the persistent receipt and the lock.
+    if (!disposed && resetNotice?.known === true && typeof resetNotice.attemptId === 'string') {
+      await acknowledgeOutcome(routes.resetReceipt, resetNotice.attemptId)
+    }
+    // Q16: a confirmed SUCCESS lingers only about five seconds — the wallet
+    // already returned to the latest inventory, and the notice follows.
+    // Refusals and the persistent outcome warning stay until the user acts.
+    if (!disposed && resetNotice?.kind === 'ok') {
+      const notice = resetNotice
+      // Clear any previous handle first and let the callback retire only its
+      // own id, so overlapping spends never leak a live timer past dispose.
+      if (outcomeNoticeTimer !== undefined) win.clearTimeout(outcomeNoticeTimer)
+      const timerId = win.setTimeout(() => {
+        if (outcomeNoticeTimer === timerId) outcomeNoticeTimer = undefined
+        if (!disposed && resetNotice === notice) {
+          resetNotice = undefined
+          onDirty()
+        }
+      }, Math.max(0, outcomeNoticeMs))
+      outcomeNoticeTimer = timerId
+    }
   }
 
   /**
@@ -127,9 +176,15 @@ export function createResetCards({
    * single authority for what the user still has to acknowledge.
    */
   async function acknowledgeOutcome(route, attemptId) {
-    // Filled in by the flow task.
-    void route
-    void attemptId
+    if (outcomeBusy || disposed || typeof attemptId !== 'string' || attemptId === '') return
+    outcomeBusy = true
+    onDirty()
+    try {
+      await fetchResetEnvelope(fetchImpl, route, { attemptId })
+    } catch { /* kept locked; the snapshot still carries the outcome */ }
+    outcomeBusy = false
+    if (!disposed) await refresh()
+    if (!disposed) onDirty()
   }
 
   /**
