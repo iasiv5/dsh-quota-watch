@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
-import { derivePackFiles, filePatternMatcher, findSecretRules, isGitHubNoreplyEmail, isSensitivePath } from '../scripts/check-public-package.mjs'
+import { derivePackFiles, filePatternMatcher, findSecretRules, isApprovedCommitEmail, isGitHubNoreplyEmail, isSensitivePath } from '../scripts/check-public-package.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -71,4 +71,14 @@ test('file pattern matcher treats directory entries as prefixes and globs as min
 test('commit privacy matcher accepts GitHub noreply addresses only', () => {
   assert.equal(isGitHubNoreplyEmail('26645513+iasiv5@users.noreply.github.com'), true)
   assert.equal(isGitHubNoreplyEmail('developer@example.invalid'), false)
+})
+
+test('commit metadata gate approves noreply and the owner-declared public identity', () => {
+  // 2026-10-24 主人裁决：iasi@163.com 是有意的公开邮箱——web 机（noreply）与
+  // Windows 机（163）两台发版机同一口径，发布不再需要改写身份。
+  assert.equal(isApprovedCommitEmail('26645513+iasiv5@users.noreply.github.com'), true)
+  assert.equal(isApprovedCommitEmail('iasi@163.com'), true)
+  assert.equal(isApprovedCommitEmail('IASI@163.com'), true, '大小写不敏感（git 邮箱语义）')
+  assert.equal(isApprovedCommitEmail('developer@example.invalid'), false)
+  assert.equal(isApprovedCommitEmail(undefined), false)
 })

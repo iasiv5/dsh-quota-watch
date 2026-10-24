@@ -6,6 +6,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const IGNORED_DIRS = new Set(['.git', 'node_modules', '.npm-cache', '.npm-logs'])
 const LOCAL_SECRET_FILES = new Set(['.npmrc', '.credentials.yaml', '.credentials.json'])
+/**
+ * 主人核准的公开提交身份（2026-10-24 裁决：`iasi@163.com` 是有意的公开邮箱）。
+ * 门禁语义从「仅 GitHub noreply」放宽为「noreply 或本名单」——两台发版机
+ * （web 机 noreply / Windows 机 163）从此同一口径，发布不再需要改写身份。
+ */
+const APPROVED_PUBLIC_EMAILS = new Set(['iasi@163.com'])
 const SECRET_PATTERNS = [
   ['private-key', /-----BEGIN (?:OPENSSH|RSA|EC|DSA) PRIVATE KEY-----/],
   ['github-token', /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b/],
@@ -32,6 +38,11 @@ export function isSensitivePath(path) {
 
 export function isGitHubNoreplyEmail(value) {
   return typeof value === 'string' && /^[^@\s]+@users\.noreply\.github\.com$/i.test(value)
+}
+
+/** 提交元数据门禁的核准身份：GitHub noreply，或主人核准的公开邮箱（APPROVED_PUBLIC_EMAILS）。 */
+export function isApprovedCommitEmail(value) {
+  return isGitHubNoreplyEmail(value) || (typeof value === 'string' && APPROVED_PUBLIC_EMAILS.has(value.trim().toLowerCase()))
 }
 
 function currentGitRoot() {
@@ -81,8 +92,8 @@ function commitMetadataFinding() {
       stdio: ['ignore', 'pipe', 'ignore'],
     })
     const emails = output.split(/\r?\n/).filter(Boolean)
-    return emails.some((email) => !isGitHubNoreplyEmail(email))
-      ? { path: 'Git commit metadata', rule: 'non-noreply-author-or-committer' }
+    return emails.some((email) => !isApprovedCommitEmail(email))
+      ? { path: 'Git commit metadata', rule: 'unapproved-public-identity' }
       : undefined
   } catch {
     return { path: 'Git commit metadata', rule: 'metadata-unavailable' }
