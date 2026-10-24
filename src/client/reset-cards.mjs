@@ -29,7 +29,7 @@ function formatNumber(value, locale) {
 function text(doc, tag, className, value) {
   const node = doc.createElement(tag)
   if (className) node.className = className
-  node.textContent = value
+  node.textContent = String(value ?? '')
   return node
 }
 
