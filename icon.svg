@@ -1,0 +1,18 @@
+<svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="dsh-quota-watch">
+  <!-- dsh-quota-watch 额度监控：270° 仪表弧（蓝色渐变）+ 指向 ~67% 的青色指针与轴心
+       = 悬浮胶囊里的额度余量表 -->
+  <circle cx="18" cy="17" r="11" stroke="url(#b)" stroke-width="4.6" stroke-linecap="round"
+          stroke-dasharray="51.84 69.12" transform="rotate(135 18 17)" fill="none"/>
+  <path d="M18 17L23.6 11.2" stroke="url(#t)" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="18" cy="17" r="2.6" fill="url(#t)"/>
+  <defs>
+    <linearGradient id="b" x1="7" y1="6" x2="29" y2="28" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#69B9FF"/>
+      <stop offset="1" stop-color="#324DE2"/>
+    </linearGradient>
+    <linearGradient id="t" x1="18" y1="17" x2="23.6" y2="11.2" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#45E7A4"/>
+      <stop offset="1" stop-color="#05909D"/>
+    </linearGradient>
+  </defs>
+</svg>
