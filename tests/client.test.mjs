@@ -1460,48 +1460,7 @@ async function openPanelGlm(window) {
 
 // glmDetailText is the hoisted function declared beside the Task 10 helpers.
 
-test('the card section renders four states purely from snapshot.reset', async () => {
-  // No wallet snapshot yet → 查询中, no buttons.
-  {
-    const window = dom({ locale: 'zh-CN' })
-    const { dispose } = await mounted(window, snapshot([glmProvider({ providerId: 'zai-coding-cn' })]))
-    await openPanelGlm(window)
-    assert.match(glmDetailText(window), /查询中/)
-    assert.equal(floatPanel(window).querySelectorAll('.dqw-reset-use').length, 0)
-    dispose(); window.close()
-  }
-  // ready non-empty → only non-zero card types render.
-  {
-    const window = dom({ locale: 'zh-CN' })
-    const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
-    const { dispose } = await mounted(window, resetSnapshot(wallet))
-    await openPanelGlm(window)
-    const rows = [...floatPanel(window).querySelectorAll('.dqw-reset-row')]
-    assert.equal(rows.length, 1, 'only the non-zero card type renders a row')
-    assert.match(rows[0].textContent, /5 小时重置卡/)
-    assert.equal(floatPanel(window).querySelectorAll('.dqw-reset-use').length, 1)
-    dispose(); window.close()
-  }
-  // error → 查询失败 with the reason and no spend buttons.
-  {
-    const window = dom({ locale: 'zh-CN' })
-    const { dispose } = await mounted(window, resetSnapshot({ status: 'error', error: 'HTTP 503' }))
-    await openPanelGlm(window)
-    assert.match(glmDetailText(window), /查询失败/)
-    assert.match(glmDetailText(window), /HTTP 503/)
-    assert.equal(floatPanel(window).querySelector('.dqw-reset-row'), null)
-    assert.equal(floatPanel(window).querySelectorAll('.dqw-reset-use').length, 0, 'an error state renders no spend buttons')
-    dispose(); window.close()
-  }
-  // Same in English.
-  {
-    const window = dom({ locale: 'en-US' })
-    const { dispose } = await mounted(window, resetSnapshot({ status: 'error', error: 'HTTP 503' }))
-    await openPanelGlm(window)
-    assert.match(glmDetailText(window), /Query failed/)
-    dispose(); window.close()
-  }
-})
+
 
 test('the first detail open without a wallet snapshot forces one refresh and never lists separately', async () => {
   const window = dom({ locale: 'zh-CN' })
@@ -1606,42 +1565,7 @@ test('a GET that started during a force cannot roll back the applied force resul
   } finally { dispose(); window.close() }
 })
 
-test('after a manual spend the wallet comes from the overview snapshot, not a second list', async () => {
-  const window = dom({ locale: 'zh-CN' })
-  let spent = false
-  const payloadFor = () => {
-    const wallet = spent
-      ? { status: 'ready', cards: { fiveHour: [], week: [] } }
-      : { status: 'ready', cards: { fiveHour: [{ recordId: 3, expireTime: '2026-11-01 09:00:00' }], week: [] } }
-    return resetSnapshot(wallet)
-  }
-  const requests = []
-  const fetchImpl = async (path, init = {}) => {
-    const target = String(path)
-    requests.push({ path: target, method: init?.method ?? 'GET' })
-    if (target.endsWith('/reset-cards/use')) {
-      spent = true
-      return response({ ok: true, message: '操作成功', attemptId: 'synthetic-attempt' })
-    }
-    return response(payloadFor())
-  }
-  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
-  try {
-    await turn()
-    await openPanelGlm(window)
-    assert.match(glmDetailText(window), /11\/01/)
-    floatPanel(window).querySelector('.dqw-reset-use').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-    await turn()
-    floatPanel(window).querySelector('.dqw-reset-btn.is-primary').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-    for (let hop = 0; hop < 5; hop += 1) await turn()
-    assert.match(glmDetailText(window), /已重置/)
-    assert.equal(requests.some((row) => row.path.endsWith('/reset-cards')), false,
-      'no separate card-list GET after a spend')
-    assert.ok(requests.filter((row) => row.method === 'GET').length >= 2, 'the overview is re-read after the spend')
-    const resetTextAfterSpend = floatPanel(window).querySelector('.dqw-reset').textContent
-    assert.doesNotMatch(resetTextAfterSpend, /11\/01/, 'the spent card disappears via the overview snapshot')
-  } finally { dispose(); window.close() }
-})
+
 
 // --- Task 11: card rows wrap on narrow screens --------------------------------
 
@@ -1674,24 +1598,7 @@ test('reset rows wrap on narrow widths and keep the spend button focusable', asy
 
 // --- Task 12: one expiry parser drives picking and display --------------------
 
-test('the earliest expiry label, its focusable detail and host picking share one time source', async () => {
-  const window = dom({ locale: 'zh-CN' })
-  const wallet = { status: 'ready', cards: { week: [
-    { recordId: 2, expireTime: '2026-11-02 00:30:00' },
-    { recordId: 1, expireTime: '2026-11-01 15:00:00Z' },
-  ], fiveHour: [] } }
-  const { dispose } = await mounted(window, resetSnapshot(wallet))
-  await openPanelGlm(window)
-  const expiry = floatPanel(window).querySelector('.dqw-reset-expiry')
-  assert.equal(expiry.textContent, '11/01 前有效', 'the visible label shows the truly earlier (Z) card')
-  assert.equal(expiry.getAttribute('tabindex'), '0', 'the full-value detail is keyboard reachable')
-  const accessible = `${expiry.getAttribute('aria-label') ?? ''} ${expiry.title ?? ''}`
-  assert.match(accessible, /2026-11-01 15:00:00Z/, 'the full original stamp is exposed')
-  assert.match(accessible, /北京时间/, 'the Beijing reading is stated as an assumption')
-  assert.doesNotMatch(accessible, /官方已/, 'it never claims official confirmation')
-  dispose()
-  window.close()
-})
+
 
 // --- Task 13: confirm/cancel semantics ----------------------------------------
 
@@ -1702,28 +1609,7 @@ async function openConfirmBox(window) {
   return floatPanel(window).querySelector('.dqw-reset-confirm')
 }
 
-test('the confirm box names the card type, both affected windows and irreversibility', async () => {
-  const window = dom({ locale: 'zh-CN' })
-  const wallet = { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } }
-  const { dispose } = await mounted(window, resetSnapshot(wallet))
-  try {
-    const confirmBox = await openConfirmBox(window)
-    assert.ok(confirmBox)
-    assert.match(confirmBox.textContent, /5 小时/)
-    assert.match(confirmBox.textContent, /无法撤销/)
-    dispose(); window.close()
 
-    const weekly = dom({ locale: 'zh-CN' })
-    const weekWallet = { status: 'ready', cards: { fiveHour: [], week: [{ recordId: 8, expireTime: '2026-12-01 09:00:00' }] } }
-    const { dispose: disposeWeekly } = await mounted(weekly, resetSnapshot(weekWallet))
-    const weekBox = await openConfirmBox(weekly)
-    assert.ok(weekBox)
-    assert.match(weekBox.textContent, /每周重置卡|每周额度/)
-    assert.match(weekBox.textContent, /5 小时额度/, 'a weekly card names the 5h window it also clears')
-    assert.match(weekBox.textContent, /无法撤销/)
-    disposeWeekly(); weekly.close()
-  } finally { /* disposed above */ }
-})
 
 test('Esc and closing clear only an uncommitted confirmation; re-entry is clean and sends nothing', async () => {
   const window = dom({ locale: 'zh-CN' })
@@ -1847,50 +1733,11 @@ async function confirmSpend(window) {
 const outcomeBlock = (window) => floatPanel(window).querySelector('[data-dsh-quota-watch-outcome]')
 const capsuleSurface = (window) => window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-capsule]')
 
-test('a known success answer shows the result and auto-confirms delivery once', async (t) => {
-  const h = outcomeHarness(t, { use: { ok: true, message: '操作成功', attemptId: 'att-1' }, receipt: 'ok' })
-  await turn()
-  await confirmSpend(h.window)
-  assert.match(glmDetailText(h.window), /已重置/)
-  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
-  assert.equal(receiptPosts.length, 1, 'exactly one delivery confirmation')
-  assert.match(receiptPosts[0].body ?? '', /att-1/, 'the receipt carries the same attemptId')
-  assert.equal(h.state.useCalls, 1, 'no retry behind the user\'s back')
-})
 
-test('a known refusal shows the upstream message and confirms delivery too', async (t) => {
-  const h = outcomeHarness(t, { use: { ok: false, error: 'rejected', message: '指定的重置次数不可用', attemptId: 'att-2' }, receipt: 'ok' })
-  await turn()
-  await confirmSpend(h.window)
-  assert.match(glmDetailText(h.window), /不可用/, 'the definite refusal is shown verbatim')
-  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
-  assert.equal(receiptPosts.length, 1)
-  assert.match(receiptPosts[0].body ?? '', /att-2/)
-})
 
-test('a lost use answer never claims failure; the snapshot receipt persists until acknowledged', async (t) => {
-  const h = outcomeHarness(t, {
-    use: 'transport-lost',
-    receipt: 'ok',
-    overviewExtra: (state) => (state.useCalls > 0 && state.receiptCalls.length === 0
-      ? { manualOutcome: { attemptId: 'att-3', resetType: 'WEEK', startedAt: 1, status: 'known-success' } }
-      : {}),
-  })
-  await turn()
-  await confirmSpend(h.window)
-  assert.match(glmDetailText(h.window), /结果未确认/, 'an ambiguous transport loss is never a "failure"')
-  assert.equal(h.state.useCalls, 1, 'no blind retry')
 
-  const block = outcomeBlock(h.window)
-  assert.ok(block, 'the persistent receipt block renders from the snapshot alone')
-  assert.match(block.textContent, /已确认成功/)
-  block.querySelector('button').dispatchEvent(new h.window.MouseEvent('click', { bubbles: true }))
-  for (let hop = 0; hop < 6; hop += 1) await turn()
-  const receiptPosts = h.requests.filter((row) => row.path.endsWith('/reset-cards/receipt'))
-  assert.equal(receiptPosts.length, 1)
-  assert.match(receiptPosts[0].body ?? '', /att-3/)
-  assert.equal(outcomeBlock(h.window), null, 'the acknowledged receipt clears from the snapshot')
-})
+
+
 
 test('an unknown outcome warns bilingually, keeps the capsule alive with zero credentials, and clears only after a verified recheck', async (t) => {
   const h = outcomeHarness(t, {
@@ -1942,49 +1789,9 @@ test('an unknown outcome warns bilingually, keeps the capsule alive with zero cr
   assert.equal(capsuleSurface(h.window).hidden, true, 'with nothing pending and nothing to show, the capsule hides again')
 })
 
-test('the unknown warning also reads in English', async (t) => {
-  const window = dom({ locale: 'en-US' })
-  const payload = {
-    ...snapshot([
-      { key: 'glm', displayName: 'GLM Coding Plan', status: 'missing', credential: 'none' },
-      { key: 'copilot', displayName: 'GitHub Copilot', status: 'missing', credential: 'none' },
-    ]),
-    manualOutcome: { attemptId: 'att-en', resetType: 'WEEK', startedAt: 1, status: 'unknown' },
-  }
-  const { dispose } = await mounted(window, payload)
-  await turn()
-  // Open the capsule panel: the overview is the warning surface when no
-  // provider row exists.
-  capsuleSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  const text = floatPanel(window).textContent
-  assert.match(text, /may have been spent/i)
-  assert.match(text, /I verified it/)
-  dispose(); window.close()
-})
 
-test('an unreadable outcome journal shows manual use as unavailable and offers no button', async (t) => {
-  const window = dom({ locale: 'zh-CN' })
-  const payload = {
-    ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
-    reset: { status: 'ready', cards: { fiveHour: [{ recordId: 7, expireTime: '2026-11-01 09:00:00' }], week: [] } },
-    manualOutcomeError: 'storage-unavailable',
-  }
-  const requests = []
-  const fetchImpl = async (path, init = {}) => {
-    requests.push({ path: String(path), method: init?.method ?? 'GET' })
-    return response(payload)
-  }
-  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
-  try {
-    await turn()
-    await openPanelGlm(window)
-    assert.match(glmDetailText(window), /手动用卡暂不可用/)
-    const button = floatPanel(window).querySelector('[data-dsh-quota-watch-outcome] button')
-    assert.equal(button, null, 'a broken journal offers no acknowledge/verify action')
-    assert.equal(requests.some((row) => row.path.endsWith('/reset-cards/use')), false)
-  } finally { dispose(); window.close() }
-})
+
+
 
 // --- Task 15: one shared 立即刷新 busy state ----------------------------------
 
@@ -2041,29 +1848,7 @@ test('立即刷新 shares one busy state: single flight, disabled button, no ext
 
 // --- Review R1: success-notice pacing and capsule label wording ---------------
 
-test('a confirmed success notice clears after about five seconds; refusals persist', async (t) => {
-  const h = outcomeHarness(t, { use: { ok: true, message: '操作成功', attemptId: 'att-5' }, receipt: 'ok', outcomeNoticeMs: 30 })
-  await turn()
-  await confirmSpend(h.window)
-  let visible = false
-  for (let hop = 0; hop < 100 && !visible; hop += 1) {
-    visible = /已重置/.test(glmDetailText(h.window))
-    if (!visible) await turn()
-  }
-  assert.ok(visible, 'the success notice is shown after the spend')
-  let cleared = false
-  for (let hop = 0; hop < 200 && !cleared; hop += 1) {
-    await turn()
-    cleared = !/已重置/.test(glmDetailText(h.window))
-  }
-  assert.ok(cleared, 'the success notice returns to the latest inventory after the injected ~5s window')
 
-  const refused = outcomeHarness(t, { use: { ok: false, error: 'rejected', message: '指定的重置次数不可用', attemptId: 'att-6' }, receipt: 'ok', outcomeNoticeMs: 30 })
-  await turn()
-  await confirmSpend(refused.window)
-  for (let hop = 0; hop < 20; hop += 1) await turn()
-  assert.match(glmDetailText(refused.window), /不可用/, 'a refusal stays until the user acts')
-})
 
 test('the capsule warning label matches the pending outcome kind', async (t) => {
   const h = outcomeHarness(t, {
@@ -2549,28 +2334,7 @@ test('empty wallet collapses behind its divider and force-refresh reveals cards'
   } finally { dispose(); window.close() }
 })
 
-test('English empty reset section collapses to one row and keeps its separator', async () => {
-  const window = dom({ locale: 'en-US' })
-  const data = {
-    ...snapshot([glmProvider({ providerId: 'zai-coding-cn' }), copilotProvider()]),
-    reset: { status: 'ready', cards: { fiveHour: [], week: [] } },
-  }
-  const fetchImpl = async (path) => response(data)
-  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000 })
-  await turn()
-  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
-  floatSurface(window).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  panel.querySelector('[data-dsh-quota-watch-row="glm"]').dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
-  await turn()
-  await turn()
-  assert.equal(panel.querySelector('.dqw-reset-collapsed .dqw-reset-title').textContent, 'Quota reset cards · none')
-  assert.equal(panel.querySelector('.dqw-reset-reload'), null)
-  assert.equal(panel.querySelector('.dqw-reset-lines'), null)
-  assert.ok(panel.querySelector('.dqw-reset'), 'the same wrapper keeps the dashed divider')
-  dispose()
-  window.close()
-})
+
 
 test('shell takeover yields the sidebar card (negative-priority workspaces occupant, 2026-10-13 ds-bot)', async () => {
   const window = dom()

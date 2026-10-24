@@ -161,10 +161,10 @@ createResetCards({
 - 接口契约：Consumes — Task 4 的全绿基线与 15 条清单；Produces — 最终测试布局（直测 + 5 条集成）。
 - 验证范围：删除后全量绿；保留 5 条集成零改动。
 
-- [ ] Step 1: 删除已迁直测的 15 条旧测试
-  - Change: 按 test 标题逐条删除：'the card section renders four states purely from snapshot.reset'、'after a manual spend the wallet comes from the overview snapshot, not a second list'、'reset rows wrap on narrow widths and keep the spend button focusable'、'the earliest expiry label, its focusable detail and host picking share one time source'、'the confirm box names the card type, both affected windows and irreversibility'、'a known success answer shows the result and auto-confirms delivery once'、'a known refusal shows the upstream message and confirms delivery too'、'a lost use answer never claims failure; the snapshot receipt persists until acknowledged'、'the unknown warning also reads in English'、'an unreadable outcome journal shows manual use as unavailable and offers no button'、'a confirmed success notice clears after about five seconds; refusals persist'、'Chinese reset and unlimited notes use spaced parentheses and padded dates'、'a reported weekly window renders real data in fixed order without the placeholder'、'domestic reset section stays two card lines with Beijing expiry and no auto-use controls'、'English empty reset section collapses to one row and keeps its separator'。仅删除列出的 test 块；同时删除仅被这些块使用的 helper（如 `resetSnapshot`/`openConfirmBox` 若再无引用）。
+- [ ] Step 1: 删除已迁直测的 11 条旧测试（执行期修正：原列 15 条中 4 条经测试正文核证留守，理由见 Step 2 与执行期偏差记录）
+  - Change: 按 test 标题逐条删除：'the card section renders four states purely from snapshot.reset'、'after a manual spend the wallet comes from the overview snapshot, not a second list'、'the earliest expiry label, its focusable detail and host picking share one time source'、'the confirm box names the card type, both affected windows and irreversibility'、'a known success answer shows the result and auto-confirms delivery once'、'a known refusal shows the upstream message and confirms delivery too'、'a lost use answer never claims failure; the snapshot receipt persists until acknowledged'、'the unknown warning also reads in English'、'an unreadable outcome journal shows manual use as unavailable and offers no button'、'a confirmed success notice clears after about five seconds; refusals persist'、'English empty reset section collapses to one row and keeps its separator'。仅删除列出的 test 块；同时删除仅被这些块使用且再无引用的 helper（核证结论：resetSnapshot/openConfirmBox/glmDetailText 均仍被留守测试引用，全部保留）。
 - [ ] Step 2: 确认保留集成零改动
-  - Change: 不动以下 5 条：'a legacy snapshot carrying autoReset renders no auto-use UI and calls no auto endpoint'、'Esc and closing clear only an uncommitted confirmation; re-entry is clean and sends nothing'（clearPending 接线合同）、'double-confirming fires exactly one spend POST and the result still lands'、'an unknown outcome warns bilingually, keeps the capsule alive with zero credentials, and clears only after a verified recheck'、'an unreadable journal or pending outcome locks the spend buttons client-side'。
+  - Change: 不动以下 5 条：'a legacy snapshot carrying autoReset renders no auto-use UI and calls no auto endpoint'、'Esc and closing clear only an uncommitted confirmation; re-entry is clean and sends nothing'（clearPending 接线合同）、'double-confirming fires exactly one spend POST and the result still lands'、'an unknown outcome warns bilingually, keeps the capsule alive with zero credentials, and clears only after a verified recheck'、'an unreadable journal or pending outcome locks the spend buttons client-side'。执行期新增加入留守的原清单 4 条及理由：'reset rows wrap on narrow widths…'（核心断言打在宿主 FLOAT_STYLE_TEXT 样式表）、'Chinese reset and unlimited notes…' 与 'a reported weekly window…'（断言打在 GLM 详情 .dqw-wins 窗格，非重置卡簇）、'domestic reset section stays two card lines…'（宿主样式断言 + ADR 0004 退休 policing 断言）。
 - [ ] Step 3: 验证并提交
   - Run: `cd dsh-quota-watch && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-task5.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-task5.log | grep -v "failing tests:" | sort -u | wc -l`
   - Run: `cd dsh-quota-watch && git add tests/client.test.mjs && git commit -m "test(client): move reset-cluster coverage to direct reset-cards tests"`
@@ -184,6 +184,14 @@ createResetCards({
   - Expected: 近 5 笔为本计划提交，author 邮箱均为核准名单；无发版提交（Q3：纯重构不发版）。
 - [ ] Step 3: 输出修改摘要（对话内交付，不生成报告文件）
 
+## 执行期偏差记录（随 Task 5 提交；全部有测试正文/仓库事实核证）
+
+1. 直测文件名 `tests/reset-cards.test.mjs` → `tests/client-reset-cards.test.mjs`：原名与既有的 `src/core/reset.mjs` 测试文件同名冲突（git ls-files 既有条目，计划立项时漏查）。
+2. 迁移清单 15 → 11 条：'reset rows wrap on narrow widths…' 与 'domestic reset section stays two card lines…' 的核心断言打在宿主 FLOAT_STYLE_TEXT 样式表；'Chinese reset and unlimited notes…' 与 'a reported weekly window…' 的断言打在 GLM 详情 .dqw-wins 窗格（原清单按标题误分类）——四条留守集成层，零修改。
+3. 白名单判据由「精确相等 5 条」改为「子集 + 4 条稳定项必现」：环境项 2044 在本机时序翻转（两轮间红绿交替），机理为 30ms notice 窗口 ≈ Windows 定时器粒度的采样混叠；直测版以注入参数 150ms + 墙钟期限轮询消除混叠，断言零放宽。
+4. 模块私有辅助除 `text()` 外增补 `localeFor`/`formatNumber` 纯函数副本（renderResetRow 计数格式化所需；冻结的 createResetCards 签名无 locale 参数位，`win` 已注入故模块内自取，行为与宿主 locale 翻转路径等价）。
+5. client.mjs 同步删除 `parseResetExpiryTime` import 行（随 earliestExpiry* 迁出的伴生依赖，全仓再无引用）；计划文档本身随 Task 1 入库并在执行期滚动修订。
+
 ## 执行纪律
 
 - 开始实现前，先批判性复查整份计划；发现缺项、矛盾、命名不一致或验证命令无效，先修计划。
@@ -196,7 +204,7 @@ createResetCards({
 ## 最终验证
 
 - 命令：`cd dsh-quota-watch && npm test 2>&1 | tee ../.dsh-research/dqw-plan-review-scratch/npmtest-final.log; grep -E "^✖" ../.dsh-research/dqw-plan-review-scratch/npmtest-final.log | grep -v "failing tests:" | sort -u | wc -l && npm run build && git diff --exit-code lib/client.js && node --check lib/client.js && npm run security:check`
-- 预期：提取行数恰 4 且标题对照白名单；其余零退出；`tests/client.test.mjs` 相对 Task 1 基线仅删除 15 条列出的测试块。B1 冻结的可观测判据（基线定义：`BASE=$(git log --format=%h -n1 --grep "chore(ci): gate lib/client.js")`，即 Task 1 的 checkpoint commit）：
+- 预期：提取行数恰 4 且标题对照白名单；其余零退出；`tests/client.test.mjs` 相对 Task 1 基线仅删除 11 条列出的测试块。B1 冻结的可观测判据（基线定义：`BASE=$(git log --format=%h -n1 --grep "chore(ci): gate lib/client.js")`，即 Task 1 的 checkpoint commit）：
   - ① `mountQuotaCard` 形参块逐行一致：`diff <(git show $BASE:src/client.mjs | sed -n '/^export function mountQuotaCard(/,/^} = {}) {/p') <(sed -n '/^export function mountQuotaCard(/,/^} = {}) {/p' src/client.mjs)` 零输出、退出码 0。
   - ② `git diff $BASE -- src/client.mjs` 的删除行（`^-`，排除 `---` 头）只允许来自：被迁出函数体、五状态声明、`fetchResetEnvelope`/`RESET_FETCH_TIMEOUT_MS`，**及其随迁删除的邻接注释/文档行**（如 854-856 wallet 注释、1032-1034 manualLocked docstring、1386-1388 reset 段注释）；新增行（`^+`，排除 `+++` 头）只允许：`createResetCards` 注入块、6 个接线点改写、dispose 链追加的 `resetCards.dispose()` 一行、`export const COPY` 一行。
 - 附带核查：`git grep -n "@deepseek-ai/" src/ package.json` 零命中（依赖红线；git grep 零命中退出码为 1，属预期，单独运行、不入 && 链）。
