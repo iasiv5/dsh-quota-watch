@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { readFile, readdir } from 'node:fs/promises'
-import { dirname, isAbsolute, relative, resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -127,7 +127,14 @@ export function derivePackFiles(worktreeFiles, pkg) {
   ]
   const matchers = patterns.map(filePatternMatcher)
   return worktreeFiles
-    .map((absolute) => (isAbsolute(absolute) ? relative(ROOT, absolute) : absolute))
+    .map((absolute) => {
+      const rel = isAbsolute(absolute) ? relative(ROOT, absolute) : absolute
+      // `relative()` yields platform separators (backslash on Windows) while
+      // the allowlist patterns and npm's manifest are POSIX-shaped; a raw
+      // Windows rel path silently matches NOTHING (2026-10-25 Windows 实录:
+      // src\host.mjs 不匹配 src/**/*.mjs，本机 pack 面扫描静默缩水).
+      return rel.split(sep).join('/')
+    })
     .filter((rel) => matchers.some((matcher) => matcher(rel)))
 }
 

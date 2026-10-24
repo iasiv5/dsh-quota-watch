@@ -80,15 +80,33 @@ test('begin enforces the single-entry lock until the record is fully acknowledge
 })
 
 test('begin reports a deterministic storage failure instead of a phantom record', (t) => {
-  const home = tempHome(t)
-  const blocker = join(home, 'blocker')
-  writeFileSync(blocker, 'i am a plain file')
+  // Write side — a plain file occupying the journal's parent directory: the
+  // write-ahead fails deterministically on every platform (mkdirSync over a
+  // file throws EEXIST on Windows and ENOTDIR-shaped errors on POSIX).
+  {
+    const home = tempHome(t)
+    const blocker = join(home, 'blocker')
+    writeFileSync(blocker, 'i am a plain file')
 
-  const journal = createManualOutcomeJournal(join(blocker, 'manual-outcome.json'))
-  assert.throws(() => journal.begin({ resetType: 'WEEK' }), ManualOutcomeStorageError)
-  // The failed begin must not be mistaken for a spendable, unlocked state by
-  // the caller: reading still fails closed instead of returning null.
-  assert.throws(() => journal.read(), ManualOutcomeStorageError)
+    const journal = createManualOutcomeJournal(join(blocker, 'manual-outcome.json'))
+    assert.throws(() => journal.begin({ resetType: 'WEEK' }), ManualOutcomeStorageError)
+  }
+  // Read side — the journal path itself occupied by a directory: reads fail
+  // closed on every platform (EISDIR). Reading THROUGH the plain-file parent
+  // above yields ENOTDIR on POSIX but ENOENT on Windows, where it is
+  // indistinguishable from a genuinely absent record — so the portable
+  // read-side case pins the path-as-directory shape instead.
+  {
+    const home = tempHome(t)
+    const asDirectory = join(home, 'as-directory')
+    mkdirSync(asDirectory)
+
+    const journal = createManualOutcomeJournal(asDirectory)
+    assert.throws(() => journal.begin({ resetType: 'WEEK' }), ManualOutcomeStorageError)
+    // The failed begin must not be mistaken for a spendable, unlocked state by
+    // the caller: reading still fails closed instead of returning null.
+    assert.throws(() => journal.read(), ManualOutcomeStorageError)
+  }
 })
 
 test('a crash-leftover in-flight record presents as unknown and clears via acknowledgeUnknown after restart', (t) => {

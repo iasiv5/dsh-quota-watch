@@ -130,10 +130,14 @@ test('a manual spend journals in-flight before the POST and keeps a known receip
 test('a failed journal write sends no POST at all', async (t) => {
   const home = mkdtempSync(join(tmpdir(), 'quota-watch-manual-'))
   t.after(() => rmSync(home, { recursive: true, force: true }))
+  // The journal path itself occupied by a directory: every platform reads
+  // that as EISDIR. (A plain file in the PARENT reads as ENOENT on Windows —
+  // indistinguishable from "no record" — so it cannot pin the guard/overview
+  // read side here; that shape stays covered in manual-outcome.test.mjs.)
   const blocker = join(home, 'blocker')
-  writeFileSync(blocker, 'a plain file blocks the journal directory')
+  mkdirSync(blocker)
 
-  const { service, calls } = makeService(t, { manualOutcomePath: join(blocker, 'manual-outcome.json') })
+  const { service, calls } = makeService(t, { manualOutcomePath: blocker })
 
   const result = await service.useResetCard({ resetType: 'WEEK' })
   assert.equal(result.ok, false)
@@ -204,7 +208,14 @@ test('a known receipt write failure keeps the disk in-flight and the wallet lock
 
   const { service, calls } = makeService(t, {
     manualOutcomePath,
-    onUse: () => { chmodSync(journalDir, 0o500) }, // the receipt replace must fail
+    // Make the receipt replace fail on EVERY platform: a read-only journal
+    // FILE blocks the Windows rename-over-target (EPERM); a read-only parent
+    // DIRECTORY blocks the POSIX temp-file creation (EACCES). Windows ignores
+    // the directory read-only bit for child creation, hence both at once.
+    onUse: () => {
+      chmodSync(journalDir, 0o500)
+      chmodSync(manualOutcomePath, 0o444)
+    },
   })
   try {
     const result = await service.useResetCard({ resetType: 'WEEK' })
@@ -219,6 +230,7 @@ test('a known receipt write failure keeps the disk in-flight and the wallet lock
     assert.equal(second.error, 'manual-outcome-unresolved', 'the wallet stays locked')
     assert.equal(useCalls(calls).length, 1, 'and no second POST happens')
   } finally {
+    chmodSync(manualOutcomePath, 0o600)
     chmodSync(journalDir, 0o700)
   }
 })
