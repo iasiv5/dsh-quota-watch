@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "GLM/GHC 额度监控（@iasiv5/dsh-quota-watch）",
+    "description": "GLM Coding Plan 与 GitHub Copilot 额度实时监控。"
+  }
+}
