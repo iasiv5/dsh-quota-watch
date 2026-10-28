@@ -1274,6 +1274,15 @@ export function mountQuotaCard({
   let slotMode = false
   let slotParent = null
   let slotDispose = null
+  // Owner share of the sidebar.footer.action contract (dsh-client-ui-sidebar
+  // slots.d.ts): SidebarFooterActionOwnerProps { wide: boolean } — "false =
+  // 56px rail". This is the OFFICIAL column-state signal, and the only sound
+  // one for the slot seat: the collapsed rail shrink-wraps the mount div to
+  // the card's own width, so a seat width measurement can never observe
+  // narrowness (it reads the card's intrinsic 176px — the 0.1.33→0.1.36
+  // collapsed-rail regression). Strict false, not falsy: a host that passes
+  // no wide at all must keep the card visible, not hide it.
+  let slotWide = true
   let anchorRetryTimer = null
   // The sidebar foot belongs to whoever registers sidebar.workspaces
   // (ui-sidebar doc: "the foot is the sidebar.workspaces registrant's"). The
@@ -1293,21 +1302,36 @@ export function mountQuotaCard({
     }
   }
   const syncFootNarrowness = () => {
-    const seat = slotParent ?? currentFoot
+    // Slot mode skips the measurement on purpose: the seat is shrink-to-fit
+    // (its width IS the card's width), so the reading is tautological — the
+    // collapsed rail reports a healthy 176px while the foot is 35px. The
+    // contract `wide` prop (slotWide) carries the collapsed signal instead.
+    // Legacy physical-anchor seats keep the footArea measurement, where the
+    // foot is a real rail-clamped container and the guard is meaningful.
+    const seat = slotMode ? currentFoot : (slotParent ?? currentFoot)
     footTooNarrow = seat !== null && seat.clientWidth > 0 && seat.clientWidth < CARD_MIN_WIDTH
   }
   const syncCardVisibility = () => {
     syncFootNarrowness()
-    // Rail entry follows the WIDTH signal, not the host attribute: this DSH
-    // build (0.2.0-rc.2 web) never writes data-sidebar-collapsed on collapse
-    // (verified via CDP + bundle grep), but the foot container measurably
-    // narrows — and the 36px gauge icon fits any rail.
-    // The sidebar card shows ONLY in an expanded sidebar: the width guard hides
-    // it in narrow rails / squeezed containers (works on every profile), and no
-    // host collapse signal is consulted at all (they proved host-specific).
-    const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden && !shellTakeover
+    // The sidebar card shows ONLY in an expanded sidebar. Two non-overlapping
+    // signals carry that:
+    //   • slot seat (0.2.x shells): the contract `wide` owner prop — false
+    //     means the 56px collapsed rail (dsh-client-ui-sidebar slots.d.ts).
+    //   • legacy anchor seat: the footArea width guard below. Host collapse
+    //     ATTRIBUTES proved host-specific (0.2.0-rc.2 web never writes
+    //     data-sidebar-collapsed), so only geometry is consulted there.
+    const slotRail = slotMode && slotWide === false
+    const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden && !shellTakeover && !slotRail
     container.hidden = !showCard
     card.style.display = showCard ? '' : 'none'
+  }
+  // The slot registrant re-renders on every wide flip (the ref callback does
+  // NOT re-fire for prop changes on the same element), so the render-phase
+  // capture defers its visibility sync to a microtask — outside the host
+  // React render, same escape hatch as the imperative container append.
+  const scheduleSlotSync = () => {
+    if (disposed) return
+    queueMicrotask(() => { if (!disposed) syncCardVisibility() })
   }
   const footResizeObserver = typeof win.ResizeObserver === 'function'
     ? new win.ResizeObserver(() => { syncCardVisibility() })
@@ -1482,10 +1506,13 @@ export function mountQuotaCard({
       // slot, the card falls back to the physical anchor seat within seconds.
       const SLOT_SEAT_ID = 'quota-watch-card'
         const CardSeat = (props) => {
-          // Owner share is { wide }; the width guard keeps measuring instead
-          // of trusting host collapse signals (they proved host-specific, see
-          // the syncCardVisibility note).
-          void props
+          // Owner share is { wide }: the official contract column state.
+          // Capture it every render — wide flips re-render this component
+          // while the div ref stays mounted, so the ref callback alone would
+          // never see the flip. Strict !== false: an absent prop keeps the
+          // card visible (unknown is not collapsed).
+          slotWide = props?.wide !== false
+          scheduleSlotSync()
           return react.createElement('div', {
             ref: (el) => {
               if (!slotMode) return // a late render after fallback engaged: ignore, container is physically seated
@@ -1517,6 +1544,7 @@ export function mountQuotaCard({
         try { win.console?.debug?.('[dsh-quota-watch] slot seat: host never rendered the slot mount — falling back to legacy anchor seat') } catch { /* no console */ }
         slotMode = false
         slotParent = null
+        slotWide = true
         slotDispose?.()
         slotDispose = null
         schedulePlace()

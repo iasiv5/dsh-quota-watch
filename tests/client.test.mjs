@@ -2378,3 +2378,62 @@ test('shell takeover yields the sidebar card (negative-priority workspaces occup
   dispose()
   window.close()
 })
+
+test('slot seat honors the contract wide flag (collapsed rail hides the card, 0.1.37 regression)', async () => {
+  const window = dom()
+  // The sidebar card is opt-in (surface flag defaults to hidden; the capsule
+  // is the default surface) — turn it on like a real user would.
+  window.localStorage.setItem(SURFACE_FLAGS_KEY, JSON.stringify({ cardHidden: false }))
+  // The 0.1.33→0.1.36 regression: the collapsed rail shrink-wraps the slot
+  // mount div to the card's own width, so the seat width guard read a healthy
+  // 176px while the foot measured 35px and the card overflowed the rail,
+  // clipped to its percent column. The sidebar.footer.action contract hands
+  // the registrant the official column state ({ wide }, "false = 56px rail");
+  // the slot seat must trust it. Fake the two host pieces slot mode needs
+  // (slots inject/register + a host React createElement) and drive the
+  // registrant exactly like the shell does.
+  let registrant = null
+  const slots = {
+    entries: () => [],
+    subscribe: () => () => {},
+    inject: (_name, factory) => { factory(); return () => {} },
+    register: (_meta, component) => { registrant = component },
+  }
+  const react = { createElement: (type, props) => ({ type, props }) }
+  const fetchImpl = async () => response(snapshot([glmProvider(), copilotProvider()]))
+  const dispose = mountQuotaCard({ doc: window.document, win: window, fetchImpl, pollIntervalMs: 60_000, slots, react })
+  try {
+    await turn()
+    // In slot mode the imperative container attaches only when the shell
+    // renders the seat and the ref callback fires — drive that first.
+    const element = registrant({ wide: true })
+    assert.equal(element.type, 'div', 'the seat renders a plain mount div')
+    assert.equal(element.props['data-dsh-quota-watch-slot'], '')
+    const mountDiv = window.document.createElement('div')
+    window.document.body.appendChild(mountDiv)
+    element.props.ref(mountDiv)
+    await turn()
+    const container = window.document.querySelector('[data-dsh-quota-watch-card]')
+    assert.ok(container, 'slot seat engaged and mounted the card container')
+    assert.equal(container.hidden, false, 'wide rail (wide=true) → the card shows')
+
+    // Collapse: the shell re-renders the registrant with wide=false; the div
+    // ref does NOT re-fire, so the render-phase capture is the only path.
+    registrant({ wide: false })
+    await turn()
+    assert.equal(container.hidden, true, 'collapsed rail (wide=false) → the card hides')
+    assert.equal(container.shadowRoot.querySelector('.dqw-card').style.display, 'none')
+
+    // Re-expand: no reload, the flip returns the card.
+    registrant({ wide: true })
+    await turn()
+    assert.equal(container.hidden, false, 'wide flip returns the card live')
+    assert.equal(container.shadowRoot.querySelector('.dqw-card').style.display, '')
+
+    // An owner that passes no wide at all (exotic host) must NOT be read as
+    // collapsed: unknown keeps the card visible.
+    registrant({})
+    await turn()
+    assert.equal(container.hidden, false, 'absent wide is unknown, not collapsed')
+  } finally { dispose(); window.close() }
+})
