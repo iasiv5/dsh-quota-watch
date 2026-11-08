@@ -69,3 +69,11 @@ _Avoid_: page, popup, pop (implementation class name only), modal, context menu
 **Sidebar card (card)**:
 The opportunistic entry rendered in the DSH web sidebar footer when that mount point exists; it is silently absent when the point does not (collapsed sidebar, desktop profile).
 _Avoid_: rail trigger (retired), sidebar widget
+
+**Capsule embed protocol**:
+The cooperative window-event protocol through which a host plugin (dsh-stock-kanban) may embed this plugin's capsule pill into its capsule group: capability probe and reply, pill-only hiding (never the float host or panel), anchored panel opening, embedded polling pause, and heartbeat-timeout self-restore (ADR 0008).
+_Avoid_: invasive hiding, host-managed capsule
+
+**Capsule group**:
+The host-side stack of guest pills inside one float shell that drags as a single unit with one position memory; this plugin's pill joins only via the embed protocol, and its panel stays owned by this plugin.
+_Avoid_: merged floating window
