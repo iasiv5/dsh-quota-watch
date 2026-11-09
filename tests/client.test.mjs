@@ -562,6 +562,39 @@ test('capsule click toggles the overview panel with 0.0.18-style summary rows', 
   window.close()
 })
 
+test('同一手势：外点关闭后的 open-panel 不重开', async (t) => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  t.after(() => { dispose(); window.close() })
+  const capsule = floatSurface(window)
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const openPanel = () => window.dispatchEvent(new window.CustomEvent('dsh-quota-watch:open-panel', {
+    detail: { v: 1, anchor: { left: 300, top: 40, right: 340, bottom: 60, width: 40, height: 20 } },
+    composed: true,
+    bubbles: true,
+  }))
+  let now = Date.now()
+  t.mock.method(Date, 'now', () => now)
+
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, false, '胶囊打开面板')
+
+  window.document.body.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, true, '外点关闭面板')
+
+  now += 100
+  openPanel()
+  await turn()
+  assert.equal(panel.hidden, true, '外点关闭后 100 毫秒内的 open-panel 不重开')
+
+  now += 500
+  openPanel()
+  await turn()
+  assert.equal(panel.hidden, false, '距外点关闭超过 500 毫秒后的 open-panel 正常开面板')
+})
+
 test('float shell hides when both providers are missing', async () => {
   const empty = dom()
   const { dispose: disposeEmpty } = await mounted(empty, snapshot([

@@ -28,6 +28,10 @@ const CARD_MIN_WIDTH = 160
 // slot-first seat mounts the card through it; the sidebarCol/footArea
 // substring discovery stays as the legacy-host fallback.
 const CARD_SLOT_NAME = 'sidebar.footer.action'
+// An outside pointerdown that closes the panel opens a gesture: the open-panel
+// that the same tap delivers afterwards must not reopen what it just closed.
+const OUTSIDE_CLOSE_GESTURE_MS = 500
+let lastOutsideCloseAt = 0
 
 /** Host React for the sidebar.footer.action slot seat (0.2.x shells render
  * registrant components with their own React). The module-loader factory
@@ -839,6 +843,10 @@ export function mountQuotaCard({
     onOpenPanel(rect) {
       if (suppressNextClick) {
         suppressNextClick = false
+        return
+      }
+      if (lastOutsideCloseAt !== 0 && Date.now() - lastOutsideCloseAt < OUTSIDE_CLOSE_GESTURE_MS) {
+        lastOutsideCloseAt = 0
         return
       }
       // Toggle semantics replicated from onSurfaceClick (spec §4): any open
@@ -1749,6 +1757,7 @@ export function mountQuotaCard({
     if (target?.getRootNode?.() === cardRoot || target?.getRootNode?.() === floatRoot) return
     // Same rule as panel-close: only an uncommitted confirmation dies here.
     resetCards.clearPending()
+    lastOutsideCloseAt = Date.now()
     openKey = undefined
     renderAll()
   }
