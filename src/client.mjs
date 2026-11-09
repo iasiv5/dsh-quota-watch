@@ -3,6 +3,7 @@ import { remainingToUsed } from './core/adapters.mjs'
 import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosition, saveSurfaceFlags, titlebarTopInset } from './client/prefs.mjs'
 import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 import { createResetCards } from './client/reset-cards.mjs'
+import { createEmbed } from './client/embed.mjs'
 
 export const name = 'quota-watch-client'
 // 2026-10-13: the shell-takeover sentinel reads the OFFICIAL slots ledger, so
@@ -591,9 +592,11 @@ export function mountQuotaCard({
   // Capsule is the only floating surface (0.1.1: the round ball was retired).
   let surface = buildCapsule()
   floatRoot.append(surface)
-  /** The capsule is always present unless no provider reports anything. */
+  /** The capsule is always present unless no provider reports anything.
+   * Embedded (CEP v1): hide the PILL only — the float host and panel stay
+   * fully functional (spec §4 engage semantics). */
   const syncFloatVisibility = () => {
-    surface.hidden = dataHidden
+    surface.hidden = dataHidden || embedded
     floatHost.hidden = dataHidden
   }
   // Mount under <body>, NOT <html>: the DSH theme tokens (--dsw-alias-*) are
@@ -815,6 +818,40 @@ export function mountQuotaCard({
     refresh: () => poll(),
     onDirty: () => { if (openKey === 'glm') syncPop() },
     outcomeNoticeMs,
+  })
+  // CEP v1 guest side (ADR 0008): the embed cluster behind the same internal
+  // seam convention. `embedded` only ever flips through onEmbeddedChange so the
+  // pill/visibility and the poll chain stay in lockstep with the protocol.
+  let embedded = false
+  const embed = createEmbed({
+    win,
+    heartbeatTimeoutMs: 15000,
+    onEmbeddedChange(next) {
+      embedded = next
+      if (next) {
+        stopPolling() // 嵌入即停链：在飞 GET 的再武装位由 !embedded 双守
+        syncFloatVisibility()
+      } else {
+        syncFloatVisibility()
+        startPolling() // 可见性/处置守卫在 startPolling 内部
+      }
+    },
+    onOpenPanel(rect) {
+      if (suppressNextClick) {
+        suppressNextClick = false
+        return
+      }
+      // Toggle semantics replicated from onSurfaceClick (spec §4): any open
+      // panel closes first; otherwise open the overview at the host-supplied
+      // viewport rect via a synthetic anchor that satisfies placePanel.
+      if (openKey !== undefined && !panel.hidden) {
+        openKey = undefined
+        syncPop()
+        return
+      }
+      const syntheticAnchor = { isConnected: true, getBoundingClientRect: () => rect }
+      openOverview(syntheticAnchor)
+    },
   })
   // Force/ordinary refresh watermark. An ordinary GET may only apply when it
   // started while NO force was in flight AND under the current force
@@ -1415,8 +1452,10 @@ export function mountQuotaCard({
       // poll — success OR transport error — arms the next one, so the no-data
       // backoff also covers a cold start whose first request fails outright.
       // The force path never arms a second chain: only the latest ordinary
-      // GET may re-arm the timer.
-      if (timer === undefined && sequence === normalSequence && !disposed && doc.visibilityState !== 'hidden') {
+      // GET may re-arm the timer. `!embedded`: while merged into a host shell
+      // (CEP v1) the guest stops its own polling chain — a landing GET must
+      // not revive it (only disengage / heartbeat-timeout restore does).
+      if (timer === undefined && sequence === normalSequence && !disposed && !embedded && doc.visibilityState !== 'hidden') {
         timer = win.setTimeout(() => {
           timer = undefined
           if (!disposed && doc.visibilityState !== 'hidden') void poll()
@@ -1619,7 +1658,7 @@ export function mountQuotaCard({
     return Math.min(delay, pollIntervalMs)
   }
   const startPolling = () => {
-    if (timer !== undefined || doc.visibilityState === 'hidden' || disposed) return
+    if (timer !== undefined || doc.visibilityState === 'hidden' || disposed || embedded) return
     void poll()
   }
   const stopPolling = () => {
@@ -1768,6 +1807,7 @@ export function mountQuotaCard({
     disposed = true
     stopPolling()
     resetCards.dispose()
+    embed.dispose()
     if (anchorRetryTimer !== null) win.clearInterval(anchorRetryTimer)
     anchorRetryTimer = null
     slotDispose?.()

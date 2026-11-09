@@ -153,3 +153,12 @@ test('the client declares every service it touches (cordis inject contract; 2026
   assert.ok(Array.isArray(inject) && inject.includes('slots'), 'client touches ctx.slots → inject must declare "slots"')
   assert.deepEqual(packageJson.dsh?.client?.inject, inject, 'package.json dsh.client.inject must mirror the client inject declaration')
 })
+
+test('EMBED_GUEST_VERSION stays in lockstep with package.json version (CEP v1 guest)', async () => {
+  const { EMBED_GUEST_VERSION } = await import('../src/client/embed.mjs')
+  assert.equal(
+    EMBED_GUEST_VERSION,
+    packageJson.version,
+    'embed-capabilities 应答里的 guestVersion 必须与发版版本同步（发版三处同步之外的第四处，此断言防漂移）',
+  )
+})
