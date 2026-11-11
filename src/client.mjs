@@ -1749,7 +1749,12 @@ export function mountQuotaCard({
     }
   }
   const onDocPointerDown = (event) => {
-    if (openKey === undefined) return
+    if (openKey === undefined) {
+      // 手势边界：上一外点关闭手势的 open-panel 此时必然已送达（被吞）或不会再有
+      // （同一手势的 pointerup 先于任何后续 pointerdown），水印清零，新点击恢复正常开关。
+      lastOutsideCloseAt = 0
+      return
+    }
     const path = typeof event.composedPath === 'function' ? event.composedPath() : []
     if (path.includes(panel) || path.includes(container)) return
     const target = event.target

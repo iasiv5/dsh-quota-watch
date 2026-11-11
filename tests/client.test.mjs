@@ -595,6 +595,36 @@ test('同一手势：外点关闭后的 open-panel 不重开', async (t) => {
   assert.equal(panel.hidden, false, '距外点关闭超过 500 毫秒后的 open-panel 正常开面板')
 })
 
+test('新手势 pointerdown 清除外点关闭水印：随后的 open-panel 正常开面板', async (t) => {
+  const window = dom()
+  const { dispose } = await mounted(window, snapshot([glmProvider(), copilotProvider()]))
+  t.after(() => { dispose(); window.close() })
+  const capsule = floatSurface(window)
+  const panel = window.document.querySelector('[data-dsh-quota-watch-float]').shadowRoot.querySelector('[data-dsh-quota-watch-panel]')
+  const openPanel = () => window.dispatchEvent(new window.CustomEvent('dsh-quota-watch:open-panel', {
+    detail: { v: 1, anchor: { left: 300, top: 40, right: 340, bottom: 60, width: 40, height: 20 } },
+    composed: true,
+    bubbles: true,
+  }))
+  let now = Date.now()
+  t.mock.method(Date, 'now', () => now)
+
+  capsule.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, false, '胶囊打开面板')
+
+  window.document.body.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }))
+  await turn()
+  assert.equal(panel.hidden, true, '外点关闭面板（盖章，本手势无 open-panel）')
+
+  now += 100
+  window.document.body.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true }))
+  await turn()
+  openPanel()
+  await turn()
+  assert.equal(panel.hidden, false, '外点关闭后的新手势点击（<500ms）正常开面板')
+})
+
 test('float shell hides when both providers are missing', async () => {
   const empty = dom()
   const { dispose: disposeEmpty } = await mounted(empty, snapshot([
