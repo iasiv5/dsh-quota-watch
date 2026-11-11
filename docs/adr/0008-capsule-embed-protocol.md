@@ -19,5 +19,5 @@ The capsule is this plugin's only guaranteed surface and lives — together with
 ## Consequences
 
 - A small release of this plugin is required before merging works; old versions simply coexist with the host's capsule (CEP degradation matrix) — no breakage window.
-- Embedded state must never orphan: a 15 s heartbeat timeout restores the pill and polling even if the host disappears without disengage (disabled, crashed, HMR).
+- Embedded state must never orphan: a 15 s heartbeat timeout restores the pill and polling even if the host disappears without disengage (disabled, crashed, HMR). The inverse holds too (0.1.39): a heartbeat arriving while standalone re-enters embedded directly — a standalone guest can only receive beats from a host that still considers the merge active, so the beat doubles as a re-engage signal and the split-brain state (host engaged / guest standalone) can no longer persist.
 - Polling pauses only while embedded; the host's 30 s overview polls keep the idle watcher fed, so quota observations stay fresh with half the requests.

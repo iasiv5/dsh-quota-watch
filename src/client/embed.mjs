@@ -3,9 +3,9 @@
  * dsh-stock-kanban; ADR 0008 here): the embed protocol cluster of
  * mountQuotaCard. Listens for the host's window-level CustomEvents
  * (namespace `dsh-quota-watch:*`), answers probes with this guest's
- * capabilities, tracks the embedded lifecycle (engage / heartbeat watchdog /
- * disengage), and forwards open-panel anchors to the mount's own toggle
- * semantics.
+ * capabilities, tracks the embedded lifecycle (engage / heartbeat watchdog +
+ * standalone-heartbeat re-embed / disengage), and forwards open-panel anchors to the mount's
+ * own toggle semantics.
  *
  * Internal seam of mountQuotaCard (ADR 0007): the external mountQuotaCard
  * interface is frozen; this module is wired only by src/client.mjs and is
