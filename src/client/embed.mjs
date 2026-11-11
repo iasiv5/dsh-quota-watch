@@ -70,7 +70,11 @@ export function createEmbed({ win, onEmbeddedChange, onOpenPanel, heartbeatTimeo
     armWatchdog()
   }
   const onHeartbeat = () => {
-    if (!embedded) return // 只在合并态武装期内重置看门狗
+    // 心跳只在宿主 engage 期间发出（宿主 stopEngage 同步清心跳定时器后才派发 disengage，
+    // 窗口级事件同步派发、无迟到心跳）。独立态收到心跳＝宿主仍认为合并中（看门狗超时
+    // 误恢复 / 访客重挂后旧宿主心跳未断），直接回嵌入并武装看门狗——心跳兼作重嵌入
+    // 信号，消灭「宿主 engaged / 访客 standalone」永久分脑（ADR 0008 语义修订，0.1.39）。
+    setEmbedded(true)
     armWatchdog()
   }
   const onDisengage = () => {

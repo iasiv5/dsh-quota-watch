@@ -280,3 +280,18 @@ test("embed 集成 · open-panel 锚定开面板 + toggle 语义（再点即关�
     window.close();
   }
 });
+
+test('embed · 独立态收到心跳 → 直接回嵌入态（分脑自愈）', async () => {
+  const win = fakeWin()
+  const changes = []
+  const embed = createEmbed({ win, heartbeatTimeoutMs: 100, onEmbeddedChange: (v) => changes.push(v) })
+  try {
+    fire(win, 'embed-heartbeat', { v: 1 })
+    assert.equal(embed.isEmbedded(), true, '独立态心跳即重嵌入')
+    assert.deepEqual(changes, [true])
+    await sleep(150)
+    assert.equal(embed.isEmbedded(), false, '心跳停止后看门狗仍恢复独立态（孤儿保护不变）')
+  } finally {
+    embed.dispose()
+  }
+})
