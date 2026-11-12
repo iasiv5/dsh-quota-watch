@@ -62,7 +62,7 @@ test('bundle patch mounts exactly the quota-watch host row', async () => {
 test('client export and quality scripts are defined', () => {
   assert.equal(packageJson.exports['./client'], './lib/client.js')
   assert.equal(packageJson.scripts.build, 'node scripts/build-client.mjs')
-  assert.equal(packageJson.scripts.test, 'node --test')
+  assert.equal(packageJson.scripts.test, 'node scripts/run-tests.mjs')
   assert.equal(packageJson.scripts['security:check'], 'node scripts/check-public-package.mjs')
   assert.equal(packageJson.scripts.prepack, 'npm run build && npm run security:check')
   assert.ok(!packageJson.files.some((path) => path.includes('.npmrc') || path.includes('credentials')))

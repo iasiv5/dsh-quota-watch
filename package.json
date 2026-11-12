@@ -57,7 +57,7 @@
   },
   "scripts": {
     "build": "node scripts/build-client.mjs",
-    "test": "node --test",
+    "test": "node scripts/run-tests.mjs",
     "security:check": "node scripts/check-public-package.mjs",
     "prepack": "npm run build && npm run security:check"
   }
