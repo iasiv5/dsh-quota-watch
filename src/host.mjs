@@ -24,7 +24,7 @@ import {
   PROVIDER_IDS,
   ROUTES,
 } from './shared.mjs'
-import { isPairedOrLoopbackAllowed, isSameOriginRequest } from './access.mjs'
+import { isPairedOrLoopbackAllowed, isSameOriginRequest, officialRejection } from './access.mjs'
 
 export const name = 'quota-watch'
 export const inject = ['webServer', 'settings', 'credentials']
@@ -124,7 +124,9 @@ function methodAllowed(req, res, method) {
 }
 
 function requestAllowed(ctx, req, res) {
-  if (isPairedOrLoopbackAllowed(ctx, req) && isSameOriginRequest(req)) return true
+  // 官方 Connection 指纹围栏优先（dsh-m 0.9.0 同款守卫式委派）；官方服务缺席时
+  // 回落既有 pairing/loopback + 同源栅栏；官方抛错 fail-closed。两者皆过才放行。
+  if (officialRejection(ctx, req) === undefined && isPairedOrLoopbackAllowed(ctx, req) && isSameOriginRequest(req)) return true
   responseJson(res, 403, { ok: false, error: 'forbidden' })
   return false
 }

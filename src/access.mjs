@@ -69,3 +69,16 @@ export function isPairedOrLoopbackAllowed(ctx, request) {
     return false
   }
 }
+
+/** 官方信任检查的守卫式委派（dsh-m 0.9.0 同款）：connection 在位 → 官方判定；服务查不到（含未注入名 get 抛错）→ undefined 回落 pairing/loopback 栅栏；围栏执行抛错 → fail-closed 403。 */
+export function officialRejection(ctx, request) {
+  let connection, reject
+  try {
+    connection = ctx?.get?.('connection')
+    reject = connection?.requestRejection
+  } catch { return undefined }
+  if (typeof reject !== 'function') return undefined
+  try {
+    return reject.call(connection, { headers: request.headers }) ?? undefined
+  } catch { return 403 }
+}
