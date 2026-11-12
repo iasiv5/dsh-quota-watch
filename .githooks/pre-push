@@ -1,0 +1,14 @@
+#!/bin/sh
+# 推送门（2026-11-12 retro）：全套离线测试 + 产物新鲜度（ci.yml verify job 的本地化）。
+# 启用（clone 后一次性）：git config core.hooksPath .githooks
+cd "$(git rev-parse --show-toplevel)" || exit 1
+if [ ! -d node_modules ]; then
+  echo "pre-push: node_modules 缺失 → 先 npm ci 再推" >&2
+  exit 1
+fi
+npm test --silent || exit 1
+npm run build --silent || exit 1
+if ! git diff --exit-code lib/client.js; then
+  echo "pre-push: lib/client.js 与源码构建不一致——提交重建产物后再推" >&2
+  exit 1
+fi
