@@ -6,7 +6,7 @@ The capsule is this plugin's only guaranteed surface and lives — together with
 
 ## Decision
 
-- Implement the **guest side of the Capsule Embed Protocol (CEP v1)** on window-level namespaced CustomEvents (`dsh-quota-watch:*`, composed): answer capability probes; while embedded, hide the capsule **pill only** (float host and panel stay fully functional), open the panel anchored to a host-supplied rect on `open-panel`, pause this plugin's own client polling chain, and self-restore (unhide + resume polling) on heartbeat timeout or `embed-disengage`.
+- Implement the **guest side of the Capsule Embed Protocol (CEP v1)** on window-level namespaced CustomEvents (`dsh-quota-watch:*`, composed): answer capability probes; while embedded, hide the capsule **pill only** (float host and panel stay fully functional), open the panel anchored to a host-supplied rect on `open-panel`, pause this plugin's own **background** client polling chain (poll-pause), and self-restore (unhide + resume polling) on heartbeat timeout or `embed-disengage`.
 - **No manifest coupling in either direction**: no peer dependency on the host plugin, no `dsh.client.external` edge toward it; absence of the host degrades exactly to today's standalone behaviour.
 - The sidebar card and all routes are unaffected; the `GET api/dsh-quota-watch/overview` route becomes the host's data source for its quota pill segment (it already feeds the idle watcher, ADR 0006).
 
@@ -20,4 +20,4 @@ The capsule is this plugin's only guaranteed surface and lives — together with
 
 - A small release of this plugin is required before merging works; old versions simply coexist with the host's capsule (CEP degradation matrix) — no breakage window.
 - Embedded state must never orphan: a 15 s heartbeat timeout restores the pill and polling even if the host disappears without disengage (disabled, crashed, HMR). The inverse holds too (0.1.39): a heartbeat arriving while standalone re-enters embedded directly — a standalone guest can only receive beats from a host that still considers the merge active, so the beat doubles as a re-engage signal and the split-brain state (host engaged / guest standalone) can no longer persist.
-- Polling pauses only while embedded; the host's 30 s overview polls keep the idle watcher fed, so quota observations stay fresh with half the requests.
+- Polling pauses only while embedded **with no guest data surface visible** (0.1.41): an open panel/pop or a visible sidebar card keeps this plugin's own chain running at its normal cadence, so opened cards never show a pre-merge snapshot; with all surfaces hidden, the host's 30 s overview polls keep the idle watcher fed and quota observations stay fresh with half the requests.

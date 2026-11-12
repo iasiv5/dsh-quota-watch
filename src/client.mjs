@@ -833,7 +833,8 @@ export function mountQuotaCard({
     onEmbeddedChange(next) {
       embedded = next
       if (next) {
-        stopPolling() // 嵌入即停链：在飞 GET 的再武装位由 !embedded 双守
+        // 嵌入即停链——但已可见的数据面（面板/弹卡/副栏卡片）保持供数（0.1.41）
+        syncEmbeddedPolling()
         syncFloatVisibility()
       } else {
         syncFloatVisibility()
@@ -872,6 +873,10 @@ export function mountQuotaCard({
   // The ONE shared 立即刷新 busy state: the detail header button, the overview
   // action and every refresh click all honor this single flag.
   let refreshBusy = false
+  // Ordinary-GET in-flight marker: render cascades (syncPop/syncCardVisibility →
+  // syncEmbeddedPolling) must not fire an extra poll while one is landing —
+  // a microtask-level poll storm would starve timers (0.1.41 regression guard).
+  let ordinaryPollInFlight = false
   let forcedResetForOpen = false   // the one-shot poll(true) guard per detail open
   // Cold until the first successful render: a mount whose first poll fails or
   // stalls must behave like the documented no-data state (hidden shell, fast
@@ -1193,6 +1198,7 @@ export function mountQuotaCard({
   }
 
   const syncPop = () => {
+    syncEmbeddedPolling() // 嵌入态：面板开合随数据面升降轮询链（0.1.41）
     if (openKey === undefined || disposed) {
       panel.hidden = true
       panel.replaceChildren()
@@ -1369,6 +1375,7 @@ export function mountQuotaCard({
     const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden && !shellTakeover && !slotRail
     container.hidden = !showCard
     card.style.display = showCard ? '' : 'none'
+    syncEmbeddedPolling() // 嵌入态：卡片可见性变化同步轮询链（0.1.41）
   }
   // The slot registrant re-renders on every wide flip (the ref callback does
   // NOT re-fire for prop changes on the same element), so the render-phase
@@ -1445,6 +1452,7 @@ export function mountQuotaCard({
       return
     }
     const sequence = ++normalSequence
+    ordinaryPollInFlight = true
     // Watermark captured at start: a GET that started during a force is never
     // applied, and neither is one started under an older force generation.
     const startedDuringForce = forceBusy
@@ -1456,14 +1464,16 @@ export function mountQuotaCard({
     } catch {
       if (sequence === normalSequence && !disposed) showTransportError()
     } finally {
+      ordinaryPollInFlight = false
       // Self-scheduling chain (replaces the fixed interval): every completed
       // poll — success OR transport error — arms the next one, so the no-data
       // backoff also covers a cold start whose first request fails outright.
       // The force path never arms a second chain: only the latest ordinary
-      // GET may re-arm the timer. `!embedded`: while merged into a host shell
-      // (CEP v1) the guest stops its own polling chain — a landing GET must
-      // not revive it (only disengage / heartbeat-timeout restore does).
-      if (timer === undefined && sequence === normalSequence && !disposed && !embedded && doc.visibilityState !== 'hidden') {
+      // GET may re-arm the timer. While merged (CEP v1) the guest keeps its
+      // background chain parked — a landing GET may only revive it when a
+      // guest data surface is visible (panel/pop/sidebar card, 0.1.41);
+      // disengage / heartbeat-timeout restore always does.
+      if (timer === undefined && sequence === normalSequence && !disposed && (!embedded || dataSurfaceOpen()) && doc.visibilityState !== 'hidden') {
         timer = win.setTimeout(() => {
           timer = undefined
           if (!disposed && doc.visibilityState !== 'hidden') void poll()
@@ -1666,12 +1676,26 @@ export function mountQuotaCard({
     return Math.min(delay, pollIntervalMs)
   }
   const startPolling = () => {
-    if (timer !== undefined || doc.visibilityState === 'hidden' || disposed || embedded) return
+    // 嵌入态仅在无可见数据面时拦截：面板/弹卡/副栏卡片可见 ⇒ 访客按自身节奏拉取（0.1.41）
+    if (timer !== undefined || doc.visibilityState === 'hidden' || disposed || (embedded && !dataSurfaceOpen())) return
     void poll()
   }
   const stopPolling = () => {
     if (timer !== undefined) win.clearTimeout(timer)
     timer = undefined
+  }
+  /** 合并态（CEP v1 poll-pause）的轮询豁免面：面板/弹卡（openKey）或副栏卡片可见。
+   *  胶囊小脸嵌入态恒隐藏（syncFloatVisibility），不计入——后台停链语义保持。 */
+  const dataSurfaceOpen = () => openKey !== undefined || !container.hidden
+  /** 嵌入态轮询随数据面升降：任一数据面开 ⇒ 立即拉取并续排常规链；全关 ⇒ 恢复停链。 */
+  const syncEmbeddedPolling = () => {
+    if (!embedded || disposed) return
+    if (dataSurfaceOpen()) {
+      // 在飞 GET 的级联渲染不补发即时拉取（settle 会按常规节奏续排），防微任务风暴
+      if (!ordinaryPollInFlight && timer === undefined) startPolling()
+    } else {
+      stopPolling()
+    }
   }
   const onVisibilityChange = () => {
     if (doc.visibilityState === 'hidden') stopPolling()

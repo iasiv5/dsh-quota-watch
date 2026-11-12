@@ -295,3 +295,88 @@ test('embed · 独立态收到心跳 → 直接回嵌入态（分脑自愈）', 
     embed.dispose()
   }
 })
+
+/* ---------------- 合并态数据面豁免（0.1.41：面板/卡片可见 ⇒ 轮询继续） ---------------- */
+
+test("embed 集成 · 嵌入态 open-panel 开面板：立即拉取、开着续排、关闭即停", async () => {
+  const window = qwDom();
+  let calls = 0;
+  const dispose = mountQuotaCard({
+    doc: window.document,
+    win: window,
+    fetchImpl: async () => { calls += 1; return qwResponse(qwSnapshot()); },
+    pollIntervalMs: 20,
+  });
+  await sleep(40); // 独立态首拉 + 数拍
+  try {
+    fireHost(window, "embed-engage", { v: 1 });
+    const frozen = calls;
+    await sleep(50);
+    assert.equal(calls, frozen, "嵌入态后台停链（无可见数据面，语义不变）");
+
+    const rect = { left: 300, top: 40, width: 40, height: 20, right: 340, bottom: 60 };
+    fireHost(window, "open-panel", { v: 1, anchor: rect });
+    await sleep(10);
+    assert.equal(calls, frozen + 1, "open-panel 打开面板立即拉取一次");
+
+    await sleep(60); // ≥ 2×pollIntervalMs：面板开着期间链路续排
+    assert.ok(calls >= frozen + 3, `面板开着期间轮询续排（实际 ${calls - frozen} 次）`);
+
+    fireHost(window, "open-panel", { v: 1, anchor: rect }); // toggle 关闭
+    await sleep(10);
+    const afterClose = calls;
+    await sleep(60);
+    assert.equal(calls, afterClose, "面板关闭后恢复停链");
+  } finally {
+    dispose();
+    window.close();
+  }
+});
+
+test("embed 集成 · 嵌入态副栏卡片可见：轮询继续；藏卡（面板仍开）不停、全关即停", async () => {
+  const window = qwDom();
+  window.localStorage.setItem('dsh-quota-watch:surface-flags', '{"cardHidden":false}');
+  let calls = 0;
+  const dispose = mountQuotaCard({
+    doc: window.document,
+    win: window,
+    fetchImpl: async () => { calls += 1; return qwResponse(qwSnapshot()); },
+    pollIntervalMs: 20,
+  });
+  await sleep(40);
+  try {
+    const container = window.document.querySelector('[data-dsh-quota-watch-card]');
+    assert.ok(container, "卡片已挂载");
+    assert.equal(container.hidden, false, "卡片可见（cardHidden=false）");
+
+    fireHost(window, "embed-engage", { v: 1 });
+    const baseline = calls;
+    await sleep(60);
+    assert.ok(calls >= baseline + 2, `卡片可见：合并态轮询继续（新增 ${calls - baseline} 次）`);
+
+    // 打开面板并从 footer 动作隐藏卡片：面板仍开 ⇒ 轮询必须继续
+    const rect = { left: 300, top: 40, width: 40, height: 20, right: 340, bottom: 60 };
+    fireHost(window, "open-panel", { v: 1, anchor: rect });
+    await sleep(10);
+    const host = window.document.querySelector("[data-dsh-quota-watch-float]");
+    const panel = host.shadowRoot.querySelector(".dqw-panel");
+    const toggle = panel.querySelector('[data-action="toggle-card"]');
+    assert.ok(toggle, "overview footer 有副栏卡片开关");
+    toggle.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await sleep(10);
+    assert.equal(container.hidden, true, "卡片已隐藏");
+    const mid = calls;
+    await sleep(50);
+    assert.ok(calls > mid, "面板仍开：隐藏卡片不停链");
+
+    // 再关面板：全部数据面关闭 ⇒ 恢复停链
+    fireHost(window, "open-panel", { v: 1, anchor: rect });
+    await sleep(10);
+    const afterClose = calls;
+    await sleep(60);
+    assert.equal(calls, afterClose, "面板+卡片全关 → 停链");
+  } finally {
+    dispose();
+    window.close();
+  }
+});
