@@ -16,7 +16,7 @@
 export const EMBED_PROTOCOL_VERSION = 1
 export const EMBED_CAPABILITIES = ['hide-pill', 'anchored-panel', 'poll-pause']
 /** 与 package.json version 同步（tests/package-shape.test.mjs 防漂移断言执有） */
-export const EMBED_GUEST_VERSION = '0.1.40'
+export const EMBED_GUEST_VERSION = '0.1.41'
 
 const NS = 'dsh-quota-watch'
 const event = (type) => `${NS}:${type}`
