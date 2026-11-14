@@ -9,9 +9,12 @@
  * tested directly by tests/poll-cadence.test.mjs. Zero imports — doc, fetch,
  * routes and every cross-cluster read arrive as injected getters — and zero
  * DOM access, so the engage/pause/resume/exemption matrix stays unit-testable
- * with mock timers and without jsdom. Bare setTimeout/clearTimeout resolve to
- * the window timers in the browser bundle (global scope) and to the Node
- * timers under node --test, which t.mock.timers intercepts.
+ * with mock timers and without jsdom. The timer source is injectable: the
+ * default resolves bare setTimeout/clearTimeout (the Node timers node --test
+ * mocks), while the mount wiring passes the window's own timers so a chain
+ * dies with its jsdom window exactly as the pre-carve code did — a window
+ * close() must stop an undisposed mount's chain, which bare Node timers never
+ * would (leaked chains re-arm forever and starve the test runner).
  */
 
 const FETCH_TIMEOUT_MS = 15_000
@@ -40,6 +43,11 @@ export function createPollCadence({
   applySnapshot,
   onTransportError,
   onBusyRender,
+  // Timer source: default = bare global timers (intercepted by t.mock.timers
+  // under node --test); the mount wiring passes the window's own timers so an
+  // undisposed mount's chain dies with its jsdom window, as before the carve.
+  setTimer = (fn, ms) => setTimeout(fn, ms),
+  clearTimer = (handle) => clearTimeout(handle),
 }) {
   let timer
   let noDataRetries = 0
@@ -123,7 +131,7 @@ export function createPollCadence({
       // guest data surface is visible (panel/pop/sidebar card, 0.1.41);
       // disengage / heartbeat-timeout restore always does.
       if (timer === undefined && sequence === normalSequence && !isDisposed() && (!isEmbedded() || isDataSurfaceOpen()) && doc.visibilityState !== 'hidden') {
-        timer = setTimeout(() => {
+        timer = setTimer(() => {
           timer = undefined
           if (!isDisposed() && doc.visibilityState !== 'hidden') void poll()
         }, nextPollDelay())
@@ -137,7 +145,7 @@ export function createPollCadence({
     void poll()
   }
   const stopPolling = () => {
-    if (timer !== undefined) clearTimeout(timer)
+    if (timer !== undefined) clearTimer(timer)
     timer = undefined
   }
   /** 嵌入态轮询随数据面升降：任一数据面开 ⇒ 立即拉取并续排常规链；全关 ⇒ 恢复停链。
