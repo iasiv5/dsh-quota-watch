@@ -30,6 +30,8 @@ export function createPollCadence({
   applySnapshot,      // (next) => void —— mount 的 render()
   onTransportError,   // () => void    —— mount 的 showTransportError()
   onBusyRender,       // () => void    —— () => { renderAll(); if (openKey !== undefined) syncPop() }
+  setTimer,           // (fn, ms) => handle —— 默认裸 global 定时器（t.mock.timers 拦截）；接线传 win.setTimeout
+  clearTimer,         // (handle) => void —— 默认裸 clearTimeout；接线传 win.clearTimeout
 }) => {
   poll,               // (force?) —— 原 client.mjs poll 整体
   startPolling, stopPolling,
@@ -46,13 +48,11 @@ export function createPollCadence({
 | `timer`、`noDataRetries`、`normalSequence`、`forceBusy`、`forceGeneration`、`refreshBusy`、`ordinaryPollInFlight` | `disposed`、`embedded`（所有权不变，经 `isEmbedded()` 注入）、`dataHidden`、`openKey`、`snapshot`、`forcedResetForOpen` 及其余全部 |
 | `fetchJson` 助手 + `FETCH_TIMEOUT_MS`（client.mjs 中唯一消费方就是 poll，L1440/L1461） | `lastOutsideCloseAt`、`suppressNextClick`（手势，不在本次范围） |
 
-### setTimeout 等价性论证（计划内决策，执行线不得改回 win.setTimeout）
+### 定时器源注入（评审后修订 · 2026-11-14 执行实测）
 
-迁移后 cadence 用**裸 `setTimeout`/`clearTimeout`**，不再走 `win.setTimeout`：
+原计划的「裸 `setTimeout` 等价性论证」被 Task 4 全量实测**部分推翻**：浏览器 bundle 与 node 单测两侧的等价性成立（探针与 15 例直测证实），但 **jsdom 生命周期维度不等价**——旧链路骑 jsdom 定时器，`window.close()` 随窗销毁；裸 node 定时器不随窗死，未 dispose 的挂载留下**永动自续排链**（测试存在 5ms/15ms 间隔链），实测后果：测试文件进程用例全绿后滞留不退（94/94 跑完无 summary）、后台持续渲染烧 CPU、时序脆弱用例（client-embed L301）抖红。
 
-- 浏览器 bundle：esbuild `format: 'cjs'` 包进 ModuleLoader factory（`scripts/build-client.mjs`），裸 `setTimeout` 解析到全局作用域 = `window.setTimeout`，运行时逐字节等价；
-- node 单测：裸定时器是 node 全局定时器，被 `t.mock.timers.enable({ apis: ['setTimeout'] })` 拦截——这是本计划测试收益的前提；`clearTimeout` 随 `setTimeout` 启用一并被 mock（`tests/host.test.mjs:374-417` 同款用法已在仓内验证）；
-- jsdom 集成测试：cadence 定时器从 jsdom 定时器变为 node 定时器——两者在 `node --test` 下都是真实定时器，节奏语义不变；既有集成测试不 mock 定时器且总在用例内 dispose，此差异对它们不可观测。**若 Task 4 全量复跑出现任何既有用例红，立即停下上报，不得改测试。**
+修订设计：cadence 的定时器源改为**注入参数** `setTimer`/`clearTimer`（默认裸 global 定时器——t.mock.timers 照常拦截，单测收益保持）；mount 接线传 `win.setTimeout`/`win.clearTimeout`，恢复与 carve 前逐字节相同的生命周期（window.close() 杀链）。修订后实测：client.test.mjs 墙钟 12.7s ≈ 用例 9.7s 无滞留，全量 15.3s 恢复基线量级。
 
 ### 嵌入态接线等价性论证
 
@@ -182,9 +182,12 @@ export function createPollCadence({
  * tested directly by tests/poll-cadence.test.mjs. Zero imports — doc, fetch,
  * routes and every cross-cluster read arrive as injected getters — and zero
  * DOM access, so the engage/pause/resume/exemption matrix stays unit-testable
- * with mock timers and without jsdom. Bare setTimeout/clearTimeout resolve to
- * the window timers in the browser bundle (global scope) and to the Node
- * timers under node --test, which t.mock.timers intercepts.
+ * with mock timers and without jsdom. The timer source is injectable: the
+ * default resolves bare setTimeout/clearTimeout (the Node timers node --test
+ * mocks), while the mount wiring passes the window's own timers so a chain
+ * dies with its jsdom window exactly as the pre-carve code did — a window
+ * close() must stop an undisposed mount's chain, which bare Node timers never
+ * would (leaked chains re-arm forever and starve the test runner).
  */
 
 const FETCH_TIMEOUT_MS = 15_000
@@ -213,6 +216,11 @@ export function createPollCadence({
   applySnapshot,
   onTransportError,
   onBusyRender,
+  // Timer source: default = bare global timers (intercepted by t.mock.timers
+  // under node --test); the mount wiring passes the window's own timers so an
+  // undisposed mount's chain dies with its jsdom window, as before the carve.
+  setTimer = (fn, ms) => setTimeout(fn, ms),
+  clearTimer = (handle) => clearTimeout(handle),
 }) {
   let timer
   let noDataRetries = 0
@@ -296,7 +304,7 @@ export function createPollCadence({
       // guest data surface is visible (panel/pop/sidebar card, 0.1.41);
       // disengage / heartbeat-timeout restore always does.
       if (timer === undefined && sequence === normalSequence && !isDisposed() && (!isEmbedded() || isDataSurfaceOpen()) && doc.visibilityState !== 'hidden') {
-        timer = setTimeout(() => {
+        timer = setTimer(() => {
           timer = undefined
           if (!isDisposed() && doc.visibilityState !== 'hidden') void poll()
         }, nextPollDelay())
@@ -310,7 +318,7 @@ export function createPollCadence({
     void poll()
   }
   const stopPolling = () => {
-    if (timer !== undefined) clearTimeout(timer)
+    if (timer !== undefined) clearTimer(timer)
     timer = undefined
   }
   /** 嵌入态轮询随数据面升降：任一数据面开 ⇒ 立即拉取并续排常规链；全关 ⇒ 恢复停链。
@@ -367,7 +375,7 @@ export function createPollCadence({
   | `createResetCards` 的 `refresh`（L822） | `() => poll()` → `() => cadence.poll()` |
   | `createEmbed` 的 `onEmbeddedChange`（L833-842） | `syncEmbeddedPolling()` → `cadence.syncEmbeddedPolling()`；`startPolling()` → `cadence.startPolling()`；其余逐语句保留（等价性论证见架构快照） |
   | 水位线状态块（L871-879：forceBusy/forceGeneration/refreshBusy/ordinaryPollInFlight） | 删除（迁入模块）；**L880 `forcedResetForOpen` 不在删除区间**，留 mount（renderDetail L1132 仍读写）；`dataHidden`（L884）保留 |
-  | `dataHidden` 声明之后（约 L885） | 新增 `const cadence = createPollCadence({ doc, fetchImpl, routes: CLIENT_ROUTES, pollIntervalMs, retryNoDataMs, retryBackoff, isDisposed: () => disposed, isEmbedded: () => embedded, isDataHidden: () => dataHidden, isDataSurfaceOpen: () => openKey !== undefined || !container.hidden, applySnapshot: (next) => render(next), onTransportError: () => showTransportError(), onBusyRender: () => { renderAll(); if (openKey !== undefined) syncPop() } })`（原 L1687-1689 的豁免面注释随迁到 isDataSurfaceOpen 实参处） |
+  | `dataHidden` 声明之后（约 L885） | 新增 `const cadence = createPollCadence({ doc, fetchImpl, routes: CLIENT_ROUTES, pollIntervalMs, retryNoDataMs, retryBackoff, isDisposed: () => disposed, isEmbedded: () => embedded, isDataHidden: () => dataHidden, isDataSurfaceOpen: () => openKey !== undefined || !container.hidden, applySnapshot: (next) => render(next), onTransportError: () => showTransportError(), onBusyRender: () => { renderAll(); if (openKey !== undefined) syncPop() }, setTimer: (fn, ms) => win.setTimeout(fn, ms), clearTimer: (handle) => win.clearTimeout(handle) })`（原 L1687-1689 的豁免面注释随迁到 isDataSurfaceOpen 实参处） |
   | `panelHeader` 的 refreshBusy 读（L964、L966） | `refreshBusy` → `cadence.isRefreshBusy()` |
   | `overviewActions` 的 refreshBusy 读（L1002-1004） | 同上 |
   | `renderDetail` 的一次性强制刷新（L1134） | `void poll(true)` → `void cadence.poll(true)` |
@@ -415,6 +423,10 @@ export function createPollCadence({
 - Expected: 工作树洁；最近两笔 = Task 3/4 的 checkpoint commit
 - Run: `git config core.hooksPath`
 - Expected: `.githooks`（clone 后一次性配置已在位；若输出为空，先 `git config core.hooksPath .githooks` 再推送）
+
+## 修订记录
+
+- **2026-11-14（评审后执行轮）**：R1/R2 评审七项（F1-F7）已吸收。执行实测推翻「裸 setTimeout 在 jsdom 生命周期上可观测等价」论断——详见「定时器源注入」节；接口相应增 `setTimer`/`clearTimer` 两参（默认裸定时器，单测判据与 15 例不变）。另两处执行补正：①改写表漏列 `let timer`/`let normalSequence`/`let noDataRetries` 三条声明行（所有权表已裁定迁入），执行按所有权表补删；②夹具两处笔误（setter 误作 cadence 方法、断言前未 resolve 第二响应）修正后 15/15 绿。既有用例 client-embed L301（嵌入态续排计数）为本机**既有时序脆弱用例**：stash 退回旧布线同机 solo 对照 1/5 红、新布线 1/6 红，不可区分——非本次 carve 引入，硬于化处置留待主人/评审裁决（修测试即冻结面破例）。
 
 ## 审阅 Checkpoint
 
