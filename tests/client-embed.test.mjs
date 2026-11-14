@@ -316,10 +316,13 @@ test("embed 集成 · 嵌入态 open-panel 开面板：立即拉取、开着续�
 
     const rect = { left: 300, top: 40, width: 40, height: 20, right: 340, bottom: 60 };
     fireHost(window, "open-panel", { v: 1, anchor: rect });
-    await sleep(10);
-    assert.equal(calls, frozen + 1, "open-panel 打开面板立即拉取一次");
+    // D1 硬于化（主人裁决 2026-11-15）：立即拉取经 onOpenPanel → openOverview →
+    // syncPop → syncEmbeddedPolling → startPolling → poll → fetchJson 全程同步
+    // 入账（fetchJson 首语句即 await fetchImpl(...)，求值即调用），dispatchEvent
+    // 返回时 calls 已自增——去掉 sleep 即无墙钟窗口，恰一次判据对负载抖动免疫。
+    assert.equal(calls, frozen + 1, "open-panel 打开面板立即拉取一次（同步入账）");
 
-    await sleep(60); // ≥ 2×pollIntervalMs：面板开着期间链路续排
+    await sleep(120); // ≥ 6×pollIntervalMs：面板开着期间链路续排（60→120ms，2 次续排留 80ms 抖动预算）
     assert.ok(calls >= frozen + 3, `面板开着期间轮询续排（实际 ${calls - frozen} 次）`);
 
     fireHost(window, "open-panel", { v: 1, anchor: rect }); // toggle 关闭

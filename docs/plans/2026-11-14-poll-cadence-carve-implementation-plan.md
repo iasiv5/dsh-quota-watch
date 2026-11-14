@@ -427,6 +427,7 @@ export function createPollCadence({
 ## 修订记录
 
 - **2026-11-14（评审后执行轮）**：R1/R2 评审七项（F1-F7）已吸收。执行实测推翻「裸 setTimeout 在 jsdom 生命周期上可观测等价」论断——详见「定时器源注入」节；接口相应增 `setTimer`/`clearTimer` 两参（默认裸定时器，单测判据与 15 例不变）。另两处执行补正：①改写表漏列 `let timer`/`let normalSequence`/`let noDataRetries` 三条声明行（所有权表已裁定迁入），执行按所有权表补删；②夹具两处笔误（setter 误作 cadence 方法、断言前未 resolve 第二响应）修正后 15/15 绿。既有用例 client-embed L301（嵌入态续排计数）为本机**既有时序脆弱用例**：stash 退回旧布线同机 solo 对照 1/5 红、新布线 1/6 红，不可区分——非本次 carve 引入，硬于化处置留待主人/评审裁决（修测试即冻结面破例）。
+- **2026-11-15（发版后主人裁决 D1=修）**：L301 硬于化落地（冻结面破例，主人授权），本提交同笔。两处墙钟敏感断言：①「立即拉取恰一次」改**同步断言**——onOpenPanel → openOverview → syncPop → syncEmbeddedPolling → startPolling → poll → fetchJson 全程同步入账（fetchJson 首语句即 `await fetchImpl(...)`，求值即调用），dispatchEvent 返回时计数已自增，去 sleep 即无超驶窗口；②「开着续排」窗口 60→120ms（判据 ≥3 不变，2 次续排留 80ms 抖动预算）。红确认（仓库外副本双变异）：A2 杀嵌入态续排 → 红恰落「面板开着期间轮询续排」且恰一次断言保持绿；B 同步双拉 → 红恰落「立即拉取恰一次」。solo 5/5 绿 + 全量 287/287。
 
 ## 审阅 Checkpoint
 
