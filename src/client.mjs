@@ -4,6 +4,7 @@ import { MARGIN, clampPoint, loadFloatPosition, loadSurfaceFlags, saveFloatPosit
 import { DRAG_SLOP_MOUSE, DRAG_SLOP_TOUCH, parseInset, clampFrame, dragSlop, grabOffset } from './client/drag.mjs'
 import { createResetCards } from './client/reset-cards.mjs'
 import { createEmbed } from './client/embed.mjs'
+import { createPollCadence } from './client/poll-cadence.mjs'
 
 export const name = 'quota-watch-client'
 // 2026-10-13: the shell-takeover sentinel reads the OFFICIAL slots ledger, so
@@ -15,7 +16,6 @@ export const inject = ['slots']
 
 const CARD_SELECTOR = '[data-dsh-quota-watch-card]'
 const FLOAT_SELECTOR = '[data-dsh-quota-watch-float]'
-const FETCH_TIMEOUT_MS = 15_000
 // Measured-size fallback for environments where getBoundingClientRect reports
 // zeros (jsdom) or the capsule has not painted yet.
 const FALLBACK_SIZE = { width: 38, height: 26 }
@@ -510,16 +510,6 @@ function footArea(doc) {
   return sidebar?.querySelector('[class*="footArea"]') ?? undefined
 }
 
-async function fetchJson(fetchImpl, path, method) {
-  const response = await fetchImpl(path, {
-    ...(method === 'POST' ? { method: 'POST' } : {}),
-    cache: 'no-store',
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  })
-  if (!response.ok) throw new Error(`HTTP ${response.status}`)
-  return response.json()
-}
-
 /** Mount a self-healing sidebar card. Dependencies are injectable for DOM tests. */
 export function mountQuotaCard({
   doc = globalThis.document,
@@ -799,9 +789,6 @@ export function mountQuotaCard({
     return disposeDrag
   }
   let snapshot
-  let normalSequence = 0
-  let timer
-  let noDataRetries = 0
   let disposed = false
   let queuedPlace = false
   let openKey
@@ -819,7 +806,7 @@ export function mountQuotaCard({
     fetchImpl,
     copy: () => copy,
     routes: CLIENT_ROUTES,
-    refresh: () => poll(),
+    refresh: () => cadence.poll(),
     onDirty: () => { if (openKey === 'glm') syncPop() },
     outcomeNoticeMs,
   })
@@ -834,11 +821,11 @@ export function mountQuotaCard({
       embedded = next
       if (next) {
         // 嵌入即停链——但已可见的数据面（面板/弹卡/副栏卡片）保持供数（0.1.41）
-        syncEmbeddedPolling()
+        cadence.syncEmbeddedPolling()
         syncFloatVisibility()
       } else {
         syncFloatVisibility()
-        startPolling() // 可见性/处置守卫在 startPolling 内部
+        cadence.startPolling() // 可见性/处置守卫在 startPolling 内部
       }
     },
     onOpenPanel(rect) {
@@ -862,26 +849,36 @@ export function mountQuotaCard({
       openOverview(syntheticAnchor)
     },
   })
-  // Force/ordinary refresh watermark. An ordinary GET may only apply when it
-  // started while NO force was in flight AND under the current force
-  // generation — so a force result can neither be dropped by a later-started
-  // GET that returned first, nor rolled back by a GET that started during the
-  // force and returned late. Only a GET started after the force completed may
-  // update the UI.
-  let forceBusy = false
-  let forceGeneration = 0
-  // The ONE shared 立即刷新 busy state: the detail header button, the overview
-  // action and every refresh click all honor this single flag.
-  let refreshBusy = false
-  // Ordinary-GET in-flight marker: render cascades (syncPop/syncCardVisibility →
-  // syncEmbeddedPolling) must not fire an extra poll while one is landing —
-  // a microtask-level poll storm would starve timers (0.1.41 regression guard).
-  let ordinaryPollInFlight = false
   let forcedResetForOpen = false   // the one-shot poll(true) guard per detail open
   // Cold until the first successful render: a mount whose first poll fails or
   // stalls must behave like the documented no-data state (hidden shell, fast
   // retries), not like a warm client showing an empty capsule.
   let dataHidden = true
+  // 轮询节奏 + 嵌入豁免集群（poll-cadence internal seam, ADR 0007）：自续排 GET 链、
+  // 冷启动退避、force/ordinary 水位线与 CEP v1 poll-pause 豁免全部内聚在该模块；
+  // 跨集群读经 getter 注入（disposed/embedded/dataHidden/豁免面），DOM 零访问。
+  const cadence = createPollCadence({
+    doc,
+    fetchImpl,
+    routes: CLIENT_ROUTES,
+    pollIntervalMs,
+    retryNoDataMs,
+    retryBackoff,
+    isDisposed: () => disposed,
+    isEmbedded: () => embedded,
+    isDataHidden: () => dataHidden,
+    // 合并态（CEP v1 poll-pause）的轮询豁免面：面板/弹卡（openKey）或副栏卡片可见。
+    // 胶囊小脸嵌入态恒隐藏（syncFloatVisibility），不计入——后台停链语义保持。
+    isDataSurfaceOpen: () => openKey !== undefined || !container.hidden,
+    applySnapshot: (next) => render(next),
+    onTransportError: () => showTransportError(),
+    onBusyRender: () => { renderAll(); if (openKey !== undefined) syncPop() },
+    // 定时器源走 window：jsdom window.close() 能随窗杀掉未 dispose 挂载的轮询链
+    // （裸 node 定时器不随窗死，链会永动自续排——0.1.41 全量实测教训）；单测走
+    // 默认裸定时器，t.mock.timers 照常拦截。
+    setTimer: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimer: (handle) => win.clearTimeout(handle),
+  })
   let surfaceFlags = loadSurfaceFlags(win.localStorage)
   const setCardHidden = (hidden) => {
     surfaceFlags = { cardHidden: hidden }
@@ -961,9 +958,9 @@ export function mountQuotaCard({
       refresh.type = 'button'
       refresh.className = 'dqw-panel-refresh'
       refresh.dataset.action = 'panel-refresh'
-      refresh.textContent = refreshBusy ? copy.actions.refreshing : copy.actions.refreshNow
+      refresh.textContent = cadence.isRefreshBusy() ? copy.actions.refreshing : copy.actions.refreshNow
       refresh.setAttribute('aria-label', refresh.textContent)
-      refresh.disabled = refreshBusy
+      refresh.disabled = cadence.isRefreshBusy()
       header.append(refresh)
     }
     const close = doc.createElement('button')
@@ -999,9 +996,9 @@ export function mountQuotaCard({
     refresh.type = 'button'
     refresh.className = 'dqw-panel-action'
     refresh.dataset.action = 'panel-refresh'
-    refresh.textContent = refreshBusy ? copy.actions.refreshing : copy.actions.refreshNow
+    refresh.textContent = cadence.isRefreshBusy() ? copy.actions.refreshing : copy.actions.refreshNow
     refresh.setAttribute('aria-label', refresh.textContent)
-    refresh.disabled = refreshBusy
+    refresh.disabled = cadence.isRefreshBusy()
     actions.append(refresh)
     return actions
   }
@@ -1131,7 +1128,7 @@ export function mountQuotaCard({
         // — never a separate card-list GET.
         if (snapshot?.reset === undefined && !forcedResetForOpen) {
           forcedResetForOpen = true
-          void poll(true)
+          void cadence.poll(true)
         }
       }
       return
@@ -1198,7 +1195,7 @@ export function mountQuotaCard({
   }
 
   const syncPop = () => {
-    syncEmbeddedPolling() // 嵌入态：面板开合随数据面升降轮询链（0.1.41）
+    cadence.syncEmbeddedPolling() // 嵌入态：面板开合随数据面升降轮询链（0.1.41）
     if (openKey === undefined || disposed) {
       panel.hidden = true
       panel.replaceChildren()
@@ -1375,7 +1372,7 @@ export function mountQuotaCard({
     const showCard = !surfaceFlags.cardHidden && !footTooNarrow && !noDataHidden && !shellTakeover && !slotRail
     container.hidden = !showCard
     card.style.display = showCard ? '' : 'none'
-    syncEmbeddedPolling() // 嵌入态：卡片可见性变化同步轮询链（0.1.41）
+    cadence.syncEmbeddedPolling() // 嵌入态：卡片可见性变化同步轮询链（0.1.41）
   }
   // The slot registrant re-renders on every wide flip (the ref callback does
   // NOT re-fire for prop changes on the same element), so the render-phase
@@ -1422,64 +1419,6 @@ export function mountQuotaCard({
   const showTransportError = () => {
     lastUpdated.hidden = false
     lastUpdated.textContent = snapshot ? copy.requestFailed : copy.failed
-  }
-
-  const poll = async (force) => {
-    if (disposed) return
-    if (force === true) {
-      // One refresh at a time; its response always wins over any ordinary GET.
-      if (refreshBusy) return
-      refreshBusy = true
-      forceBusy = true
-      const generation = ++forceGeneration
-      // Flip the shared busy state before the request: header button, overview
-      // action and label clicks all re-render against it.
-      renderAll()
-      if (openKey !== undefined) syncPop()
-      try {
-        const next = await fetchJson(fetchImpl, CLIENT_ROUTES.refresh, 'POST')
-        if (generation === forceGeneration && !disposed) render(next)
-      } catch {
-        if (!disposed) showTransportError()
-      } finally {
-        forceBusy = false
-        refreshBusy = false
-        if (!disposed) {
-          renderAll()
-          if (openKey !== undefined) syncPop()
-        }
-      }
-      return
-    }
-    const sequence = ++normalSequence
-    ordinaryPollInFlight = true
-    // Watermark captured at start: a GET that started during a force is never
-    // applied, and neither is one started under an older force generation.
-    const startedDuringForce = forceBusy
-    const genAtStart = forceGeneration
-    try {
-      const next = await fetchJson(fetchImpl, CLIENT_ROUTES.overview, 'GET')
-      const applicable = !startedDuringForce && genAtStart === forceGeneration
-      if (sequence === normalSequence && applicable && !disposed) render(next)
-    } catch {
-      if (sequence === normalSequence && !disposed) showTransportError()
-    } finally {
-      ordinaryPollInFlight = false
-      // Self-scheduling chain (replaces the fixed interval): every completed
-      // poll — success OR transport error — arms the next one, so the no-data
-      // backoff also covers a cold start whose first request fails outright.
-      // The force path never arms a second chain: only the latest ordinary
-      // GET may re-arm the timer. While merged (CEP v1) the guest keeps its
-      // background chain parked — a landing GET may only revive it when a
-      // guest data surface is visible (panel/pop/sidebar card, 0.1.41);
-      // disengage / heartbeat-timeout restore always does.
-      if (timer === undefined && sequence === normalSequence && !disposed && (!embedded || dataSurfaceOpen()) && doc.visibilityState !== 'hidden') {
-        timer = win.setTimeout(() => {
-          timer = undefined
-          if (!disposed && doc.visibilityState !== 'hidden') void poll()
-        }, nextPollDelay())
-      }
-    }
   }
 
   const place = () => {
@@ -1659,48 +1598,7 @@ export function mountQuotaCard({
   syncFloatVisibility()
   place()
 
-  /** Cold-start cadence: while no provider has rendered any data, re-poll on
-   * a shortening backoff (retryNoDataMs × retryBackoffⁿ, capped at
-   * pollIntervalMs) so a desktop cold start surfaces the capsule in seconds
-   * instead of waiting out the fixed interval. A successful render resets the
-   * chain to the normal cadence; a transport error keeps the previous
-   * dataHidden state, so a cold client keeps retrying fast and a warm one
-   * stays calm. */
-  const nextPollDelay = () => {
-    if (!dataHidden) {
-      noDataRetries = 0
-      return pollIntervalMs
-    }
-    const delay = retryNoDataMs * (retryBackoff ** noDataRetries)
-    noDataRetries += 1
-    return Math.min(delay, pollIntervalMs)
-  }
-  const startPolling = () => {
-    // 嵌入态仅在无可见数据面时拦截：面板/弹卡/副栏卡片可见 ⇒ 访客按自身节奏拉取（0.1.41）
-    if (timer !== undefined || doc.visibilityState === 'hidden' || disposed || (embedded && !dataSurfaceOpen())) return
-    void poll()
-  }
-  const stopPolling = () => {
-    if (timer !== undefined) win.clearTimeout(timer)
-    timer = undefined
-  }
-  /** 合并态（CEP v1 poll-pause）的轮询豁免面：面板/弹卡（openKey）或副栏卡片可见。
-   *  胶囊小脸嵌入态恒隐藏（syncFloatVisibility），不计入——后台停链语义保持。 */
-  const dataSurfaceOpen = () => openKey !== undefined || !container.hidden
-  /** 嵌入态轮询随数据面升降：任一数据面开 ⇒ 立即拉取并续排常规链；全关 ⇒ 恢复停链。 */
-  const syncEmbeddedPolling = () => {
-    if (!embedded || disposed) return
-    if (dataSurfaceOpen()) {
-      // 在飞 GET 的级联渲染不补发即时拉取（settle 会按常规节奏续排），防微任务风暴
-      if (!ordinaryPollInFlight && timer === undefined) startPolling()
-    } else {
-      stopPolling()
-    }
-  }
-  const onVisibilityChange = () => {
-    if (doc.visibilityState === 'hidden') stopPolling()
-    else startPolling()
-  }
+  const onVisibilityChange = () => cadence.onVisibilityChange()
   const toggleRow = (key) => {
     panelNav = false
     lastAnchor = anchorFromRow(key)
@@ -1720,7 +1618,7 @@ export function mountQuotaCard({
     // target with no retargeting ambiguity.
     if (event.target?.closest?.('[data-action="panel-refresh"]')) {
       // The host force-refresh re-lists cards too; do not issue a duplicate GET.
-      void poll(true)
+      void cadence.poll(true)
       return
     }
     if (event.target?.closest?.('[data-action="toggle-card"]')) {
@@ -1757,8 +1655,8 @@ export function mountQuotaCard({
   // real row/label in every browser.
   const onBodyClick = (event) => {
     if (event.target?.closest?.('[data-action="refresh"]')) {
-      if (refreshBusy) return
-      void poll(true)
+      if (cadence.isRefreshBusy()) return
+      void cadence.poll(true)
       return
     }
     const row = event.target?.closest?.('[data-dsh-quota-watch-row][data-expandable]')
@@ -1839,11 +1737,11 @@ export function mountQuotaCard({
   doc.addEventListener('scroll', onDocScroll, true)
   doc.addEventListener('keydown', onDocKeydown)
   win.addEventListener('resize', onWinResize)
-  startPolling()
+  cadence.startPolling()
 
   return () => {
     disposed = true
-    stopPolling()
+    cadence.stopPolling()
     resetCards.dispose()
     embed.dispose()
     if (anchorRetryTimer !== null) win.clearInterval(anchorRetryTimer)
