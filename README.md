@@ -2,8 +2,8 @@
 
 [![CI](https://img.shields.io/github/actions/workflow/status/iasiv5/dsh-quota-watch/ci.yml?branch=main&label=CI)](https://github.com/iasiv5/dsh-quota-watch/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@iasiv5/dsh-quota-watch?label=npm)](https://www.npmjs.com/package/@iasiv5/dsh-quota-watch)
-![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5%20verified-2563eb)
 [![License](https://img.shields.io/github/license/iasiv5/dsh-quota-watch?label=License)](./LICENSE)
+![DSH](https://img.shields.io/badge/DSH-0.2.2--rc.5%20verified-2563eb)
 
 [English summary](#english-summary) · 中文
 
