@@ -34,7 +34,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": "^4.0.2"
+    "@deepseek-ai/cordis": ">=4.0.2"
   },
   "devDependencies": {
     "esbuild": "^0.28.2",
